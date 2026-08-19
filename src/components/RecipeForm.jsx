@@ -204,8 +204,13 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
               <Field label="COAL (in)">
                 <input type="number" step="0.001" min="0" value={form.coalInches} onChange={update('coalInches')} className={inputClass} />
               </Field>
-              <Field label="Rifle">
-                <input value={form.rifleModel} onChange={update('rifleModel')} className={inputClass} placeholder='Bergara B-14 (24" bbl)' />
+              <Field label="Firearm">
+                <input
+                  value={form.rifleModel}
+                  onChange={update('rifleModel')}
+                  className={inputClass}
+                  placeholder='Bergara B-14 (24" bbl) or Glock 19 Gen 5'
+                />
               </Field>
             </div>
 

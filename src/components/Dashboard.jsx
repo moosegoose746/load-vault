@@ -29,6 +29,16 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     onTargetChange?.(target.moa);
   }, [target.moa, onTargetChange]);
 
+  // Same idea for velocity: while a chrono file is imported or shots are
+  // typed in manually this session, the HUD cards and Velocity Log should
+  // reflect that live data instead of staying frozen on whatever was saved
+  // to the recipe's last range session.
+  const liveStats = chronoShots && chronoShots.length ? computeVelocityStats(chronoShots) : null;
+  const displayAvgVelocity = liveStats ? Math.round(liveStats.avg) : recipe.avgVelocity;
+  const displayStdDevFps = liveStats ? Number(liveStats.sd.toFixed(1)) : recipe.stdDevFps;
+  const displayExtremeSpread = liveStats ? liveStats.es : recipe.extremeSpread;
+  const displayShots = chronoShots && chronoShots.length ? chronoShots : recipe.shots;
+
   const handleSave = async () => {
     setSaveError('');
 
@@ -91,14 +101,14 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       </div>
 
       <div className="mb-4 grid grid-cols-3 gap-3">
-        <MetricCard value={recipe.avgVelocity} unit="FPS" label="Avg FPS" />
-        <MetricCard value={recipe.stdDevFps} unit="FPS" label="FPS SD" />
-        <MetricCard value={recipe.extremeSpread} unit="FPS" label="FPS ES" />
+        <MetricCard value={displayAvgVelocity} unit="FPS" label="Avg FPS" />
+        <MetricCard value={displayStdDevFps} unit="FPS" label="FPS SD" />
+        <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
       </div>
 
       <RecipeChecklist
         items={[
-          { label: 'Rifle', value: recipe.rifleModel },
+          { label: 'Firearm', value: recipe.rifleModel },
           { label: 'Powder', value: recipe.powder },
         ]}
       />
@@ -111,7 +121,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       </div>
 
       <div className="mb-4">
-        <VelocityLog shots={recipe.shots} avgVelocity={recipe.avgVelocity} />
+        <VelocityLog shots={displayShots} avgVelocity={displayAvgVelocity} />
       </div>
 
       <div className="mb-4">
