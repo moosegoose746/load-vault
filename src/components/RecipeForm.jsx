@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { createRecipe, fetchCalibers, fetchComponentsByType } from '../lib/recipes.js';
+import { fetchUserFirearms } from '../lib/firearms.js';
 
 function Field({ label, children }) {
   return (
@@ -25,6 +26,7 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
   const [bullets, setBullets] = useState([]);
   const [primers, setPrimers] = useState([]);
   const [brass, setBrass] = useState([]);
+  const [firearms, setFirearms] = useState([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -38,7 +40,7 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
     primerId: '',
     brassId: '',
     coalInches: '',
-    rifleModel: '',
+    firearmId: '',
     notes: '',
   });
 
@@ -52,19 +54,37 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
       fetchComponentsByType('bullet'),
       fetchComponentsByType('primer'),
       fetchComponentsByType('brass'),
+      authUser ? fetchUserFirearms(authUser.id) : Promise.resolve([]),
     ])
-      .then(([c, p, b, pr, br]) => {
+      .then(([c, p, b, pr, br, f]) => {
         setCalibers(c);
         setPowders(p);
         setBullets(b);
         setPrimers(pr);
         setBrass(br);
+        setFirearms(f);
       })
       .catch((err) => setError(err.message || 'Failed to load component options.'))
       .finally(() => setLoadingOptions(false));
-  }, [open]);
+  }, [open, authUser]);
 
   const update = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  // Only offer firearm profiles that actually match the caliber picked
+  // above — same reasoning as the Range Day firearm picker (a .223
+  // rifle isn't a meaningful choice for a .308 recipe). Reset the
+  // selection whenever the caliber changes out from under it, so
+  // switching calibers can't leave a mismatched firearm silently
+  // selected.
+  const firearmsForCaliber = useMemo(
+    () => firearms.filter((f) => f.caliber_id === form.caliberId),
+    [firearms, form.caliberId]
+  );
+
+  useEffect(() => {
+    setForm((prev) => (prev.firearmId ? { ...prev, firearmId: '' } : prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.caliberId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -89,7 +109,7 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
           primerId: form.primerId,
           brassId: form.brassId,
           coalInches: form.coalInches ? Number.parseFloat(form.coalInches) : null,
-          rifleModel: form.rifleModel,
+          firearmId: form.firearmId,
           notes: form.notes,
         },
         authUser.id
@@ -204,13 +224,28 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
               <Field label="COAL (in)">
                 <input type="number" step="0.001" min="0" value={form.coalInches} onChange={update('coalInches')} className={inputClass} />
               </Field>
-              <Field label="Firearm">
-                <input
-                  value={form.rifleModel}
-                  onChange={update('rifleModel')}
-                  className={inputClass}
-                  placeholder='Bergara B-14 (24" bbl) or Glock 19 Gen 5'
-                />
+              <Field label="Firearm (optional)">
+                <select
+                  value={form.firearmId}
+                  onChange={update('firearmId')}
+                  disabled={!form.caliberId}
+                  className={`${inputClass} disabled:opacity-40`}
+                >
+                  <option value="">Not linked</option>
+                  {firearmsForCaliber.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+                {!form.caliberId && (
+                  <span className="font-mono text-[10px] text-slate-600">Pick a caliber first</span>
+                )}
+                {form.caliberId && firearmsForCaliber.length === 0 && (
+                  <span className="font-mono text-[10px] text-slate-600">
+                    No firearms saved for this caliber yet — add one on the Firearms page.
+                  </span>
+                )}
               </Field>
             </div>
 

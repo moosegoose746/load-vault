@@ -307,7 +307,12 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
           <RecipeChecklist
             items={[
-              { label: 'Firearm', value: recipe.rifleModel },
+              // Prefer the recipe's linked Firearm Profile (see
+              // schema_recipes_v2.sql); fall back to the legacy
+              // free-text rifle_model for recipes created before that
+              // link existed and never given one, or '—' for a recipe
+              // that's never had either.
+              { label: 'Firearm', value: recipe.firearmLabel ?? recipe.rifleModel ?? '—' },
               { label: 'Powder', value: recipe.powder },
             ]}
           />

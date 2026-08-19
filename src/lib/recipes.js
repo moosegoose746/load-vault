@@ -235,6 +235,14 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
     primerId: row.primer?.id ?? null,
     brassId: row.brass?.id ?? null,
     rifleModel: row.rifle_model || '—',
+    // The real firearm this recipe is linked to, if any (see
+    // schema_recipes_v2.sql) — a proper Firearm Profile, not the old
+    // free-text rifle_model field above. `firearmLabel` is what UI code
+    // should actually render: the linked profile's name if one's set,
+    // falling back to the legacy free-text field for older recipes that
+    // predate Firearm Profiles and were never given a linked one.
+    firearmId: row.firearm_id ?? null,
+    firearmLabel: row.firearm?.name ?? (row.rifle_model || null),
     distanceYards: session?.distance_yards ?? 100,
     groupSizeMoa: session?.group_size_moa ?? null,
     avgVelocity: session?.avg_velocity_fps ?? null,
@@ -248,12 +256,15 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
     // no recipeId yet) renders the same as `null` (nothing logged) in the
     // UI, both show as "—".
     roundsOnHand: roundsOnHand ?? null,
-    // Which firearm the most recent range session for this recipe used,
-    // if any — used purely as a default pre-fill for the firearm picker
-    // on the NEXT range session (see Dashboard.jsx), not a hard link.
-    // Firearm is a per-session choice (see schema_firearms.sql for why),
-    // this is just "what did I pick last time for this recipe."
-    defaultFirearmId: session?.firearm_id ?? null,
+    // Best-guess pre-fill for the Range Day firearm picker (see
+    // Dashboard.jsx) — NOT a hard link, since firearm is still a
+    // per-session choice (see schema_firearms.sql for why). Prefers
+    // whatever was picked on the most recent range session for this
+    // recipe (recency wins, e.g. this recipe got tested on a different
+    // rifle last time out); falls back to the recipe's own linked
+    // firearm (firearmId above) for the very first session, or for
+    // recipes that have never had a session logged yet.
+    defaultFirearmId: session?.firearm_id ?? row.firearm_id ?? null,
     shots: shots ?? [],
   };
 }
@@ -275,8 +286,9 @@ export async function fetchRecipeDetail(recipeId, userId) {
     .from('load_recipes')
     .select(
       `
-      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, notes,
+      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, firearm_id, notes,
       calibers ( name ),
+      firearm:firearms ( id, name ),
       powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
       bullet:components!load_recipes_bullet_id_fkey ( id, brand, model ),
       primer:components!load_recipes_primer_id_fkey ( id, brand, model ),
@@ -322,7 +334,12 @@ export async function archiveRecipe(recipeId) {
   if (error) throw error;
 }
 
-/** Create a new load_recipes row. `fields` uses the *_id foreign keys directly. */
+/** Create a new load_recipes row. `fields` uses the *_id foreign keys
+ * directly. `firearmId` links to a real Firearm Profile (see
+ * schema_recipes_v2.sql) — the New Recipe form no longer collects the
+ * old free-text `rifle_model`, so that column is just left null for new
+ * recipes going forward (still populated on older rows, read as a
+ * fallback — see firearmLabel in mapRecipeRow above). */
 export async function createRecipe(fields, userId) {
   const { data, error } = await supabase
     .from('load_recipes')
@@ -336,7 +353,7 @@ export async function createRecipe(fields, userId) {
       primer_id: fields.primerId || null,
       brass_id: fields.brassId || null,
       coal_inches: fields.coalInches || null,
-      rifle_model: fields.rifleModel || null,
+      firearm_id: fields.firearmId || null,
       notes: fields.notes || null,
     })
     .select()
