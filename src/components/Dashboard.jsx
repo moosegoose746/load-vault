@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Boxes, Save, Share2 } from 'lucide-react';
+import { AlertTriangle, Boxes, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import RecipeChecklist from './RecipeChecklist.jsx';
@@ -20,7 +20,23 @@ import { fetchUserFirearms } from '../lib/firearms.js';
 // ammo — THIS is what consumes components) and a Range Session (shooting
 // some of what's already loaded — this just draws down Rounds On Hand,
 // it doesn't touch component stock).
+//
+// Which of the three recipe sub-views is showing. Split out of what used
+// to be one long scrolling page — Overview (what is this recipe / where
+// does it stand), Loading Session (bench workflow: assembling ammo,
+// consumes components), and Range Day (what happens when you actually go
+// shoot: target analysis, chrono, rounds fired). Mirrors the two real
+// separate events already modeled in the database (see
+// supabase/schema_batches.sql) instead of stacking every workflow into a
+// single page regardless of which one a user is actually there for.
+const TABS = [
+  { key: 'overview', label: 'OVERVIEW', icon: SlidersHorizontal, realOnly: false },
+  { key: 'loading', label: 'LOADING SESSION', icon: Boxes, realOnly: true },
+  { key: 'range', label: 'RANGE DAY', icon: Crosshair, realOnly: false },
+];
+
 export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange }) {
+  const [dashboardTab, setDashboardTab] = useState('overview');
   const [target, setTarget] = useState({ imageEl: null, imageBlob: null, shots: [], moa: null, groupInches: null });
   const [chronoShots, setChronoShots] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -248,6 +264,8 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     }
   };
 
+  const visibleTabs = TABS.filter((t) => !t.realOnly || isRealRecipe);
+
   return (
     <main className="flex-1 p-4">
       <div className="mb-4 flex flex-col gap-1">
@@ -257,21 +275,49 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         <p className="text-xs text-slate-400">Target {recipe.distanceYards}YD</p>
       </div>
 
-      <div className="mb-4 grid grid-cols-3 gap-3">
-        <MetricCard value={displayAvgVelocity} unit="FPS" label="Avg FPS" />
-        <MetricCard value={displayStdDevFps} unit="FPS" label="FPS SD" />
-        <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
+      <div className="mb-4 flex gap-2 border-b border-slate-800">
+        {visibleTabs.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setDashboardTab(key)}
+            className={`flex items-center gap-1.5 border-b-2 px-3 py-2 font-mono text-xs transition-colors ${
+              dashboardTab === key
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </div>
 
-      <RecipeChecklist
-        items={[
-          { label: 'Firearm', value: recipe.rifleModel },
-          { label: 'Powder', value: recipe.powder },
-        ]}
-      />
+      {dashboardTab === 'overview' && (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard value={displayAvgVelocity} unit="FPS" label="Avg FPS" />
+            <MetricCard value={displayStdDevFps} unit="FPS" label="FPS SD" />
+            <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
+          </div>
 
-      {isRealRecipe && (
-        <div className="my-4 rounded border border-slate-800 bg-panel p-4">
+          <RecipeChecklist
+            items={[
+              { label: 'Firearm', value: recipe.rifleModel },
+              { label: 'Powder', value: recipe.powder },
+            ]}
+          />
+
+          {!isRealRecipe && (
+            <p className="rounded border border-slate-800 bg-panel px-4 py-3 font-mono text-xs text-slate-500">
+              This is the built-in demo recipe — Loading Session tracking only applies to your own
+              saved recipes. Create one from the Sidebar to try it out.
+            </p>
+          )}
+        </div>
+      )}
+
+      {dashboardTab === 'loading' && isRealRecipe && (
+        <div className="rounded border border-slate-800 bg-panel p-4">
           <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
             <Boxes size={14} />
             Log a Loading Session
@@ -375,104 +421,104 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         </div>
       )}
 
-      <div className="my-4 rounded border border-slate-800 bg-panel p-4">
-        <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
-          Target Analysis
-        </h2>
-        <TargetCalculator
-          distanceYards={recipe.distanceYards}
-          onStateChange={setTarget}
-          initialImageUrl={recipe.targetImageUrl}
-        />
-      </div>
-
-      <div className="mb-4">
-        <VelocityLog shots={displayShots} avgVelocity={displayAvgVelocity} />
-      </div>
-
-      <div className="mb-4">
-        <ChronoImport onImportComplete={setChronoShots} />
-      </div>
-
-      {isRealRecipe && (
-        <div className="mb-4 flex flex-wrap items-end gap-3 rounded border border-slate-800 bg-panel p-4">
-          <label className="flex flex-col gap-1">
-            <span className="font-mono text-[10px] uppercase text-slate-500">Rounds Fired Today</span>
-            <input
-              type="number"
-              step="1"
-              min="0"
-              value={roundsFired}
-              onChange={(e) => {
-                setRoundsFired(e.target.value);
-                setRoundsFiredEdited(true);
-              }}
-              className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+      {dashboardTab === 'range' && (
+        <div className="flex flex-col gap-4">
+          <div className="rounded border border-slate-800 bg-panel p-4">
+            <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
+              Target Analysis
+            </h2>
+            <TargetCalculator
+              distanceYards={recipe.distanceYards}
+              onStateChange={setTarget}
+              initialImageUrl={recipe.targetImageUrl}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="font-mono text-[10px] uppercase text-slate-500">Firearm (optional)</span>
-            <select
-              value={firearmId}
-              onChange={(e) => {
-                setFirearmId(e.target.value);
-                setFirearmIdEdited(true);
-              }}
-              className="w-48 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+          </div>
+
+          <VelocityLog shots={displayShots} avgVelocity={displayAvgVelocity} />
+
+          <ChronoImport onImportComplete={setChronoShots} />
+
+          {isRealRecipe && (
+            <div className="flex flex-wrap items-end gap-3 rounded border border-slate-800 bg-panel p-4">
+              <label className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] uppercase text-slate-500">Rounds Fired Today</span>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={roundsFired}
+                  onChange={(e) => {
+                    setRoundsFired(e.target.value);
+                    setRoundsFiredEdited(true);
+                  }}
+                  className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] uppercase text-slate-500">Firearm (optional)</span>
+                <select
+                  value={firearmId}
+                  onChange={(e) => {
+                    setFirearmId(e.target.value);
+                    setFirearmIdEdited(true);
+                  }}
+                  className="w-48 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">Not tracked</option>
+                  {firearmsForRecipe.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+                {firearmsForRecipe.length === 0 && (
+                  <span className="font-mono text-[10px] text-slate-600">
+                    No firearms saved for this caliber yet — add one on the Firearms page.
+                  </span>
+                )}
+              </label>
+              <p className="max-w-md text-xs text-slate-400">
+                Draws down Rounds On Hand — doesn't touch your component stock, since those were
+                already used when you logged a loading session. Picking a firearm also adds these
+                rounds to its tracked round count/barrel life.
+              </p>
+              {exceedsOnHand && (
+                <p className="flex items-center gap-1 font-mono text-[11px] text-amber-400">
+                  <AlertTriangle size={12} />
+                  More than your {recipe.roundsOnHand} rounds on hand — log a loading session if you
+                  forgot to, or this may be ammo from outside the app.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saveState === 'saving'}
+              className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
             >
-              <option value="">Not tracked</option>
-              {firearmsForRecipe.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-            {firearmsForRecipe.length === 0 && (
-              <span className="font-mono text-[10px] text-slate-600">
-                No firearms saved for this caliber yet — add one on the Firearms page.
+              <Save size={14} />
+              {saveState === 'saving' ? 'SAVING…' : saveState === 'saved' ? 'SAVED' : 'SAVE TO VAULT'}
+            </button>
+            <button
+              onClick={() => setExportOpen(true)}
+              className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10"
+            >
+              <Share2 size={14} />
+              SHARE RECIPE
+            </button>
+            {!isRealRecipe && pendingCount > 0 && (
+              <span className="font-mono text-[11px] text-slate-500">
+                {status === 'syncing' ? 'Syncing' : 'Queued'} {pendingCount} session
+                {pendingCount === 1 ? '' : 's'}
+                {status === 'queued' ? ' — will sync when back online' : '…'}
               </span>
             )}
-          </label>
-          <p className="max-w-md text-xs text-slate-400">
-            Draws down Rounds On Hand — doesn't touch your component stock, since those were
-            already used when you logged the loading session above. Picking a firearm also adds
-            these rounds to its tracked round count/barrel life.
-          </p>
-          {exceedsOnHand && (
-            <p className="flex items-center gap-1 font-mono text-[11px] text-amber-400">
-              <AlertTriangle size={12} />
-              More than your {recipe.roundsOnHand} rounds on hand — log a loading session if you
-              forgot to, or this may be ammo from outside the app.
-            </p>
-          )}
+            {saveError && <span className="font-mono text-[11px] text-red-400">{saveError}</span>}
+          </div>
         </div>
       )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={saveState === 'saving'}
-          className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
-        >
-          <Save size={14} />
-          {saveState === 'saving' ? 'SAVING…' : saveState === 'saved' ? 'SAVED' : 'SAVE TO VAULT'}
-        </button>
-        <button
-          onClick={() => setExportOpen(true)}
-          className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10"
-        >
-          <Share2 size={14} />
-          SHARE RECIPE
-        </button>
-        {!isRealRecipe && pendingCount > 0 && (
-          <span className="font-mono text-[11px] text-slate-500">
-            {status === 'syncing' ? 'Syncing' : 'Queued'} {pendingCount} session
-            {pendingCount === 1 ? '' : 's'}
-            {status === 'queued' ? ' — will sync when back online' : '…'}
-          </span>
-        )}
-        {saveError && <span className="font-mono text-[11px] text-red-400">{saveError}</span>}
-      </div>
 
       <TargetExportModal
         open={exportOpen}
