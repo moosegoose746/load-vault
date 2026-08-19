@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Beaker, Plus, Trash2, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
+import WorkupChart from './WorkupChart.jsx';
 import {
   addWorkupRung,
   createWorkup,
@@ -419,6 +420,19 @@ function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
         {workup && (
           <>
             {workup.notes && <p className="whitespace-pre-wrap text-xs text-slate-400">{workup.notes}</p>}
+
+            <div>
+              <h3 className="mb-1.5 flex items-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                Charge Weight vs. Velocity
+                <InfoTooltip>
+                  Each amber dot is one rung's average velocity; the smaller dim dots are its individual
+                  shots. The dashed line is a fitted trend across rungs — a flat spot (velocity not
+                  rising as much as the line predicts) is often a forgiving pressure/harmonic node.
+                  Tap a rung's average dot for its full readout.
+                </InfoTooltip>
+              </h3>
+              <WorkupChart rungs={workup.rungs} />
+            </div>
 
             <div>
               <h3 className="mb-1.5 flex items-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
