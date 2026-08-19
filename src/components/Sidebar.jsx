@@ -1,4 +1,5 @@
-import { Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import MoaBadge from './MoaBadge.jsx';
 
 // Section 3: "Left Sidebar (Specs & Filter Panel) — Prominent MOA Badge,
@@ -19,10 +20,31 @@ function SpecRow({ label, value }) {
   );
 }
 
-export default function Sidebar({ recipe, userRecipes, activeRecipeId, onSelectRecipe, onNewRecipe }) {
+export default function Sidebar({
+  recipe,
+  userRecipes,
+  activeRecipeId,
+  onSelectRecipe,
+  onNewRecipe,
+  onDeleteRecipe,
+  liveMoa,
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Drop any pending delete confirmation if the selected recipe changes out
+  // from under it (e.g. switching recipes mid-confirm).
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [activeRecipeId]);
+
+  // Prefer the live reading from shots currently being plotted on the
+  // target; fall back to whatever MOA was saved on the recipe's last range
+  // session once nothing is actively being measured.
+  const displayMoa = liveMoa ?? recipe.groupSizeMoa;
+
   return (
     <aside className="flex w-full flex-col gap-6 border-slate-800 p-4 sm:w-72 sm:border-r">
-      <MoaBadge moa={recipe.groupSizeMoa} />
+      <MoaBadge moa={displayMoa} />
 
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>
@@ -45,6 +67,32 @@ export default function Sidebar({ recipe, userRecipes, activeRecipeId, onSelectR
           <Plus size={14} />
           NEW RECIPE
         </button>
+
+        {activeRecipeId &&
+          (confirmingDelete ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onDeleteRecipe(activeRecipeId)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded border border-red-600 bg-red-950 px-3 py-1.5 font-mono text-xs text-red-300 hover:bg-red-900"
+              >
+                CONFIRM DELETE
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                className="rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-slate-500"
+              >
+                CANCEL
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="flex items-center justify-center gap-1.5 rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
+            >
+              <Trash2 size={14} />
+              DELETE RECIPE
+            </button>
+          ))}
       </div>
 
       <div className="flex flex-col gap-1">

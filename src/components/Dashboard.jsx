@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Save, Share2 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
@@ -12,7 +12,7 @@ import { computeVelocityStats } from '../lib/stats.js';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
-export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved }) {
+export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange }) {
   const [target, setTarget] = useState({ imageEl: null, shots: [], moa: null, groupInches: null });
   const [chronoShots, setChronoShots] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -21,6 +21,13 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const [saveError, setSaveError] = useState('');
 
   const isRealRecipe = Boolean(activeRecipeId);
+
+  // Report the live MOA reading up to App.jsx as shots are plotted, so the
+  // Sidebar's MOA badge updates in real time instead of only reflecting
+  // whatever was saved on the recipe's last range session.
+  useEffect(() => {
+    onTargetChange?.(target.moa);
+  }, [target.moa, onTargetChange]);
 
   const handleSave = async () => {
     setSaveError('');

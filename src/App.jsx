@@ -7,7 +7,7 @@ import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import RecipeForm from './components/RecipeForm.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
-import { fetchRecipeDetail, fetchUserRecipes } from './lib/recipes.js';
+import { archiveRecipe, fetchRecipeDetail, fetchUserRecipes } from './lib/recipes.js';
 
 // An on-page form rather than window.prompt() — native browser dialogs
 // get silently swallowed inside some embedded preview panels (e.g. VS
@@ -91,6 +91,10 @@ function AppShell() {
   const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
   const [recipeFormOpen, setRecipeFormOpen] = useState(false);
   const [recipeError, setRecipeError] = useState('');
+  // Live MOA reading from the Target Analysis section (Dashboard), lifted up
+  // here so the Sidebar's MOA badge can reflect shots being plotted right
+  // now, not just whatever was saved on the recipe's last range session.
+  const [liveMoa, setLiveMoa] = useState(null);
 
   const refreshRecipeList = useCallback(async () => {
     if (!auth.user) return;
@@ -126,6 +130,29 @@ function AppShell() {
     loadActiveRecipe();
   }, [loadActiveRecipe]);
 
+  // Reset the live MOA reading whenever the active recipe changes, so
+  // switching recipes doesn't leave a stale reading from the previous one
+  // showing in the badge.
+  useEffect(() => {
+    setLiveMoa(null);
+  }, [activeRecipeId]);
+
+  const handleDeleteRecipe = useCallback(
+    async (recipeId) => {
+      try {
+        await archiveRecipe(recipeId);
+        if (activeRecipeId === recipeId) {
+          setActiveRecipeId(null);
+        }
+        await refreshRecipeList();
+      } catch (err) {
+        console.error('Failed to delete recipe', err);
+        setRecipeError('Failed to delete that recipe.');
+      }
+    },
+    [activeRecipeId, refreshRecipeList]
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center font-mono text-amber-400">
@@ -154,8 +181,17 @@ function AppShell() {
             activeRecipeId={activeRecipeId}
             onSelectRecipe={setActiveRecipeId}
             onNewRecipe={() => setRecipeFormOpen(true)}
+            onDeleteRecipe={handleDeleteRecipe}
+            liveMoa={liveMoa}
           />
-          <Dashboard recipe={activeRecipe} activeRecipeId={activeRecipeId} authUser={auth.user} onSessionSaved={loadActiveRecipe} />
+          <Dashboard
+            key={activeRecipeId ?? 'demo'}
+            recipe={activeRecipe}
+            activeRecipeId={activeRecipeId}
+            authUser={auth.user}
+            onSessionSaved={loadActiveRecipe}
+            onTargetChange={setLiveMoa}
+          />
         </div>
       ) : (
         <SignInGate onSignIn={auth.signInWithEmail} />

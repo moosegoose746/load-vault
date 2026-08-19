@@ -88,6 +88,15 @@ export async function fetchRecipeDetail(recipeId) {
   return mapRecipeRow(row, sessions?.[0]);
 }
 
+/** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
+ * so any range_sessions/shot_logs history isn't lost and the row can be
+ * recovered later if needed). RLS's "Users manage own recipes" policy
+ * covers the UPDATE. */
+export async function archiveRecipe(recipeId) {
+  const { error } = await supabase.from('load_recipes').update({ is_archived: true }).eq('id', recipeId);
+  if (error) throw error;
+}
+
 /** Create a new load_recipes row. `fields` uses the *_id foreign keys directly. */
 export async function createRecipe(fields, userId) {
   const { data, error } = await supabase
