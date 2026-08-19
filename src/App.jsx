@@ -64,9 +64,19 @@ function SignInGate({ onSignIn }) {
   );
 }
 
+// Dev-only auth bypass, gated behind a local .env flag — never set this in
+// Vercel's environment variables, only in your own .env file, or it would
+// disable auth on the live site too. Lets you skip the magic-link round
+// trip while iterating on everything past the sign-in screen.
+const DEV_SKIP_AUTH = import.meta.env.VITE_SKIP_AUTH === 'true';
+const DEV_USER = { id: 'dev-local-user', email: 'dev@localhost' };
+
 function AppShell() {
-  const { user, loading, signInWithEmail, signOut } = useAuth();
+  const auth = useAuth();
   const { rangeMode } = useRangeMode();
+
+  const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
+  const loading = DEV_SKIP_AUTH ? false : auth.loading;
 
   if (loading) {
     return (
@@ -82,14 +92,19 @@ function AppShell() {
         rangeMode ? 'text-lg' : ''
       }`}
     >
-      <Header user={user} onSignOut={signOut} />
+      {DEV_SKIP_AUTH && (
+        <div className="bg-red-900/60 px-4 py-1 text-center font-mono text-[11px] tracking-wide text-red-200">
+          DEV MODE — AUTH BYPASSED (local only, set by VITE_SKIP_AUTH in .env)
+        </div>
+      )}
+      <Header user={user} onSignOut={auth.signOut} />
       {user ? (
         <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
           <Sidebar recipe={mockRecipe} />
           <Dashboard recipe={mockRecipe} />
         </div>
       ) : (
-        <SignInGate onSignIn={signInWithEmail} />
+        <SignInGate onSignIn={auth.signInWithEmail} />
       )}
     </div>
   );

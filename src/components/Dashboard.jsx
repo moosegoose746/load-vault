@@ -1,13 +1,17 @@
+import { useState } from 'react';
 import { Save, Share2 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import RecipeChecklist from './RecipeChecklist.jsx';
+import TargetCalculator from './TargetCalculator.jsx';
+import TargetExportModal from './TargetExportModal.jsx';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
-// Target Plotting Canvas with Touch Loupe ships in Phase 3
-// (<TargetCalculator/>) — this panel reserves the space for it.
 export default function Dashboard({ recipe }) {
+  const [target, setTarget] = useState({ imageEl: null, shots: [], moa: null, groupInches: null });
+  const [exportOpen, setExportOpen] = useState(false);
+
   return (
     <main className="flex-1 p-4">
       <div className="mb-4 flex flex-col gap-1">
@@ -30,9 +34,11 @@ export default function Dashboard({ recipe }) {
         ]}
       />
 
-      {/* Reserved for <TargetCalculator/> — Phase 3 */}
-      <div className="my-4 flex h-40 items-center justify-center rounded border border-dashed border-slate-700 font-mono text-xs text-slate-600">
-        TARGET CANVAS — PHASE 3
+      <div className="my-4 rounded border border-slate-800 bg-panel p-4">
+        <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
+          Target Analysis
+        </h2>
+        <TargetCalculator distanceYards={recipe.distanceYards} onStateChange={setTarget} />
       </div>
 
       <div className="mb-4">
@@ -44,11 +50,23 @@ export default function Dashboard({ recipe }) {
           <Save size={14} />
           SAVE TO VAULT
         </button>
-        <button className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10">
+        <button
+          onClick={() => setExportOpen(true)}
+          className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10"
+        >
           <Share2 size={14} />
           SHARE RECIPE
         </button>
       </div>
+
+      <TargetExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        imageEl={target.imageEl}
+        shots={target.shots}
+        moa={target.moa}
+        recipe={recipe}
+      />
     </main>
   );
 }
