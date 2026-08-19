@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Plus, Trash2 } from 'lucide-react';
 import {
+  GRAINS_PER_LB,
   addInventoryEntry,
   deleteInventoryEntry,
   fetchAllComponents,
@@ -8,48 +9,80 @@ import {
   updateInventoryEntry,
 } from '../lib/inventory.js';
 
-const TYPE_LABELS = { powder: 'Powder', bullet: 'Bullet', primer: 'Primer', brass: 'Brass' };
-const TYPE_OPTIONS = Object.entries(TYPE_LABELS);
-
-// Powder's package_qty is stored in GRAINS (matching charge_weight_grains
-// on a recipe), so the column header needs to say so explicitly —
-// otherwise "Package Qty" reads as "how many jugs" instead of "how many
-// grains in the container you bought."
-const PACKAGE_QTY_UNIT = { powder: 'grains', bullet: 'count', primer: 'count', brass: 'count' };
+// Powder is bought by the pound but metered out by the grain (matching a
+// recipe's charge_weight_grains), so its section tracks Container Weight
+// in lbs and shows a computed Cost/Grain — everything else (bullets,
+// primers, brass) is bought and used in whole units, so it tracks a plain
+// count instead. Internally `package_qty`/`quantity_on_hand` are always
+// stored in the same base unit the recipe math uses (grains for powder,
+// count for everything else); only the powder section's inputs convert
+// to/from lbs for display, right here.
+const SECTIONS = [
+  { type: 'powder', label: 'Powder', isPowder: true },
+  { type: 'bullet', label: 'Bullet', isPowder: false },
+  { type: 'primer', label: 'Primer', isPowder: false },
+  { type: 'brass', label: 'Brass', isPowder: false },
+];
 
 const CUSTOM_VALUE = '__custom__';
-
-function draftFromRow(row) {
-  return {
-    unitCost: row.unit_cost != null ? String(row.unit_cost) : '',
-    packageQty: row.package_qty != null ? String(row.package_qty) : '',
-    quantityOnHand: row.quantity_on_hand != null ? String(row.quantity_on_hand) : '',
-    reloadCycles: row.reload_cycles != null ? String(row.reload_cycles) : '',
-  };
-}
-
-function emptyNewRow() {
-  return {
-    type: 'powder',
-    componentId: '',
-    customName: '',
-    unitCost: '',
-    packageQty: '',
-    quantityOnHand: '',
-    reloadCycles: '',
-  };
-}
 
 const inputClass =
   'w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none';
 
+function draftFromRow(row, isPowder) {
+  const packageQty = row.package_qty != null ? (isPowder ? row.package_qty / GRAINS_PER_LB : row.package_qty) : '';
+  const quantityOnHand =
+    row.quantity_on_hand != null ? (isPowder ? row.quantity_on_hand / GRAINS_PER_LB : row.quantity_on_hand) : '';
+  return {
+    unitCost: row.unit_cost != null ? String(row.unit_cost) : '',
+    packageQty: packageQty !== '' ? String(packageQty) : '',
+    quantityOnHand: quantityOnHand !== '' ? String(quantityOnHand) : '',
+    reloadCycles: row.reload_cycles != null ? String(row.reload_cycles) : '',
+  };
+}
+
+function emptyDraft() {
+  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '' };
+}
+
+function emptyNewRow() {
+  return { componentId: '', customName: '', ...emptyDraft() };
+}
+
+/** Parse a draft's typed values into base-unit numbers ready to save
+ * (converting lbs -> grains for powder). Returns null if the required
+ * fields (cost, package qty) aren't valid. */
+function parseDraft(draft, isPowder) {
+  const unitCost = Number.parseFloat(draft.unitCost);
+  const packageQtyRaw = Number.parseFloat(draft.packageQty);
+  if (!Number.isFinite(unitCost) || unitCost < 0 || !Number.isFinite(packageQtyRaw) || packageQtyRaw <= 0) {
+    return null;
+  }
+  const packageQty = isPowder ? Math.round(packageQtyRaw * GRAINS_PER_LB) : Math.round(packageQtyRaw);
+  const quantityOnHandRaw = draft.quantityOnHand !== '' ? Number.parseFloat(draft.quantityOnHand) : null;
+  const quantityOnHand =
+    quantityOnHandRaw != null ? Math.round((isPowder ? quantityOnHandRaw * GRAINS_PER_LB : quantityOnHandRaw) * 100) / 100 : null;
+  return {
+    unitCost,
+    packageQty,
+    quantityOnHand,
+    reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
+  };
+}
+
+function formatCostPerUnit(unitCost, packageQty, isPowder) {
+  if (!unitCost || !packageQty) return '—';
+  const perUnit = unitCost / packageQty;
+  return `$${perUnit.toFixed(isPowder ? 4 : 3)}`;
+}
+
 // Section 6 of the master doc: "Unit Economics & Inventory Analytics" —
 // personal component pricing (never the shared catalog's placeholder
-// prices) and stock, laid out as a spreadsheet-style table. Each row is
-// either a shared catalog component (picked from a dropdown) or a fully
-// custom, private-to-you component typed in by hand — see
-// supabase/schema_inventory.sql for how the two are distinguished, and
-// src/lib/inventory.js for the data layer.
+// prices) and stock, grouped by component type so each section's columns
+// can match how that type is actually bought and used. Each section is
+// its own small spreadsheet with its own "add a row" control — pick a
+// catalog component, or type in your own if it isn't listed. See
+// supabase/schema_inventory.sql and src/lib/inventory.js.
 export default function InventoryPage({ authUser }) {
   const [components, setComponents] = useState([]);
   const [rows, setRows] = useState([]);
@@ -57,10 +90,10 @@ export default function InventoryPage({ authUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [rowStatus, setRowStatus] = useState({}); // { [rowId]: 'saving' | 'saved' | 'error' }
-  const [newRow, setNewRow] = useState(emptyNewRow());
-  const [addStatus, setAddStatus] = useState('idle'); // idle | saving | error
+  const [newRows, setNewRows] = useState({ powder: emptyNewRow(), bullet: emptyNewRow(), primer: emptyNewRow(), brass: emptyNewRow() });
+  const [addStatus, setAddStatus] = useState({});
 
-  const load = () => {
+  useEffect(() => {
     if (!authUser) {
       setLoading(false);
       return;
@@ -73,49 +106,44 @@ export default function InventoryPage({ authUser }) {
         setRows(invRows);
         const nextDrafts = {};
         invRows.forEach((row) => {
-          nextDrafts[row.id] = draftFromRow(row);
+          const isPowder = (row.component?.type ?? row.custom_type) === 'powder';
+          nextDrafts[row.id] = draftFromRow(row, isPowder);
         });
         setDrafts(nextDrafts);
       })
       .catch((err) => setError(err.message || 'Failed to load inventory.'))
       .finally(() => setLoading(false));
-  };
+  }, [authUser]);
 
-  useEffect(load, [authUser]);
-
-  // Catalog components already in the table (for this type) shouldn't show
-  // up again in the "add a row" dropdown — one row per catalog component,
-  // enforced by the DB's partial unique index too.
   const usedComponentIds = useMemo(
     () => new Set(rows.filter((r) => r.component_id).map((r) => r.component_id)),
     [rows]
   );
 
-  const availableComponents = useMemo(
-    () => components.filter((c) => c.type === newRow.type && !usedComponentIds.has(c.id)),
-    [components, newRow.type, usedComponentIds]
-  );
+  const rowsByType = useMemo(() => {
+    const byType = { powder: [], bullet: [], primer: [], brass: [] };
+    rows.forEach((row) => {
+      const type = row.component?.type ?? row.custom_type;
+      if (byType[type]) byType[type].push(row);
+    });
+    return byType;
+  }, [rows]);
+
+  const availableComponentsByType = useMemo(() => {
+    const byType = { powder: [], bullet: [], primer: [], brass: [] };
+    components.forEach((c) => {
+      if (byType[c.type] && !usedComponentIds.has(c.id)) byType[c.type].push(c);
+    });
+    return byType;
+  }, [components, usedComponentIds]);
 
   const updateDraft = (rowId, field, value) => {
     setDrafts((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [field]: value } }));
   };
 
-  const parseDraft = (draft) => {
-    const unitCost = Number.parseFloat(draft.unitCost);
-    const packageQty = Number.parseInt(draft.packageQty, 10);
-    if (!Number.isFinite(unitCost) || unitCost < 0 || !Number.isInteger(packageQty) || packageQty <= 0) {
-      return null;
-    }
-    return {
-      unitCost,
-      packageQty,
-      quantityOnHand: draft.quantityOnHand !== '' ? Number.parseFloat(draft.quantityOnHand) : null,
-      reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
-    };
-  };
-
   const handleSaveRow = async (row) => {
-    const parsed = parseDraft(drafts[row.id] ?? draftFromRow(row));
+    const isPowder = (row.component?.type ?? row.custom_type) === 'powder';
+    const parsed = parseDraft(drafts[row.id] ?? draftFromRow(row, isPowder), isPowder);
     if (!parsed) {
       setRowStatus((prev) => ({ ...prev, [row.id]: 'error' }));
       return;
@@ -146,36 +174,38 @@ export default function InventoryPage({ authUser }) {
     }
   };
 
-  const handleAddRow = async () => {
+  const handleAddRow = async (type) => {
+    const isPowder = type === 'powder';
+    const newRow = newRows[type];
     const isCustom = newRow.componentId === CUSTOM_VALUE;
     if (isCustom && !newRow.customName.trim()) {
-      setAddStatus('error');
+      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
       return;
     }
     if (!isCustom && !newRow.componentId) {
-      setAddStatus('error');
+      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
       return;
     }
-    const parsed = parseDraft(newRow);
+    const parsed = parseDraft(newRow, isPowder);
     if (!parsed) {
-      setAddStatus('error');
+      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
       return;
     }
-    setAddStatus('saving');
+    setAddStatus((prev) => ({ ...prev, [type]: 'saving' }));
     try {
       const saved = await addInventoryEntry(authUser.id, {
         componentId: isCustom ? null : newRow.componentId,
         customName: isCustom ? newRow.customName.trim() : null,
-        customType: isCustom ? newRow.type : null,
+        customType: isCustom ? type : null,
         ...parsed,
       });
       setRows((prev) => [...prev, saved]);
-      setDrafts((prev) => ({ ...prev, [saved.id]: draftFromRow(saved) }));
-      setNewRow(emptyNewRow());
-      setAddStatus('idle');
+      setDrafts((prev) => ({ ...prev, [saved.id]: draftFromRow(saved, isPowder) }));
+      setNewRows((prev) => ({ ...prev, [type]: emptyNewRow() }));
+      setAddStatus((prev) => ({ ...prev, [type]: 'idle' }));
     } catch (err) {
       console.error('Failed to add inventory entry', err);
-      setAddStatus('error');
+      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
     }
   };
 
@@ -195,246 +225,244 @@ export default function InventoryPage({ authUser }) {
       <div className="mb-4 flex flex-col gap-1">
         <h1 className="font-mono text-lg font-bold text-slate-100">MY INVENTORY & PRICING</h1>
         <p className="text-xs text-slate-400">
-          Enter what YOU actually paid for each component you use — this is personal to your
+          Purchase Price is what you paid for the whole package (a jug of powder, a box of
+          primers) — Cost/Grain and Cost/Unit are worked out for you. This is personal to your
           account, separate from the shared catalog, and drives the Cost / Round shown on your
-          recipes. Pick a component from the catalog below, or add your own if it isn't listed.
+          recipes.
         </p>
       </div>
 
       {loading && <p className="font-mono text-xs text-slate-400">Loading…</p>}
       {error && <p className="font-mono text-xs text-red-400">{error}</p>}
 
-      {!loading && !error && (
-        <div className="overflow-x-auto rounded border border-slate-800">
-          <table className="w-full min-w-[820px] border-collapse font-mono text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 bg-panel text-left text-[10px] uppercase tracking-widest text-slate-500">
-                <th className="px-3 py-2">Component</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Your Cost ($)</th>
-                <th className="px-3 py-2">Package Qty</th>
-                <th className="px-3 py-2">Qty On Hand</th>
-                <th className="px-3 py-2">Reload Cycles</th>
-                <th className="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-3 py-4 text-center text-xs text-slate-600">
-                    No inventory yet — add a row below to start tracking your own pricing.
-                  </td>
-                </tr>
-              )}
-              {rows.map((row) => {
-                const displayType = row.component?.type ?? row.custom_type;
-                const displayName = row.component
-                  ? `${row.component.brand} ${row.component.model}`
-                  : row.custom_name;
-                const draft = drafts[row.id] ?? draftFromRow(row);
-                const status = rowStatus[row.id];
-                return (
-                  <tr key={row.id} className="border-b border-slate-800/60 last:border-0">
-                    <td className="px-3 py-2 align-top">
-                      <span className="text-slate-100">{displayName}</span>
-                      {!row.component && (
-                        <span className="ml-2 rounded border border-slate-700 px-1.5 py-0.5 text-[9px] uppercase text-slate-500">
-                          custom
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 align-top text-slate-400">{TYPE_LABELS[displayType]}</td>
-                    <td className="px-3 py-2 align-top">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={draft.unitCost}
-                        onChange={(e) => updateDraft(row.id, 'unitCost', e.target.value)}
-                        className={`${inputClass} w-24`}
-                      />
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="flex items-center gap-1.5">
+      {!loading &&
+        !error &&
+        SECTIONS.map(({ type, label, isPowder }) => {
+          const sectionRows = rowsByType[type];
+          const newRow = newRows[type];
+          const status = addStatus[type];
+          return (
+            <div key={type} className="mb-8">
+              <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">{label}</h2>
+              <div className="overflow-x-auto rounded border border-slate-800">
+                <table className="w-full min-w-[760px] border-collapse font-mono text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-panel text-left text-[10px] uppercase tracking-widest text-slate-500">
+                      <th className="px-3 py-2">Component</th>
+                      <th className="px-3 py-2">Purchase Price ($)</th>
+                      <th className="px-3 py-2">{isPowder ? 'Container Weight (lbs)' : 'Qty per Package'}</th>
+                      <th className="px-3 py-2">{isPowder ? 'Cost/Grain' : 'Cost/Unit'}</th>
+                      <th className="px-3 py-2">Qty On Hand{isPowder ? ' (lbs)' : ''}</th>
+                      {type === 'brass' && <th className="px-3 py-2">Reload Cycles (est.)</th>}
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sectionRows.length === 0 && (
+                      <tr>
+                        <td colSpan={type === 'brass' ? 6 : 5} className="px-3 py-3 text-center text-xs text-slate-600">
+                          No {label.toLowerCase()} tracked yet.
+                        </td>
+                      </tr>
+                    )}
+                    {sectionRows.map((row) => {
+                      const displayName = row.component ? `${row.component.brand} ${row.component.model}` : row.custom_name;
+                      const draft = drafts[row.id] ?? draftFromRow(row, isPowder);
+                      const rstatus = rowStatus[row.id];
+                      return (
+                        <tr key={row.id} className="border-b border-slate-800/60 last:border-0">
+                          <td className="px-3 py-2 align-top">
+                            <span className="text-slate-100">{displayName}</span>
+                            {!row.component && (
+                              <span className="ml-2 rounded border border-slate-700 px-1.5 py-0.5 text-[9px] uppercase text-slate-500">
+                                custom
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={draft.unitCost}
+                              onChange={(e) => updateDraft(row.id, 'unitCost', e.target.value)}
+                              className={`${inputClass} w-24`}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              type="number"
+                              step={isPowder ? '0.1' : '1'}
+                              min={isPowder ? '0.1' : '1'}
+                              value={draft.packageQty}
+                              onChange={(e) => updateDraft(row.id, 'packageQty', e.target.value)}
+                              className={`${inputClass} w-24`}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-400">
+                            {formatCostPerUnit(
+                              Number.parseFloat(draft.unitCost),
+                              isPowder
+                                ? Number.parseFloat(draft.packageQty) * GRAINS_PER_LB
+                                : Number.parseFloat(draft.packageQty),
+                              isPowder
+                            )}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="optional"
+                              value={draft.quantityOnHand}
+                              onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
+                              className={`${inputClass} w-24`}
+                            />
+                          </td>
+                          {type === 'brass' && (
+                            <td className="px-3 py-2 align-top">
+                              <input
+                                type="number"
+                                step="1"
+                                min="1"
+                                placeholder="1"
+                                value={draft.reloadCycles}
+                                onChange={(e) => updateDraft(row.id, 'reloadCycles', e.target.value)}
+                                className={`${inputClass} w-20`}
+                              />
+                            </td>
+                          )}
+                          <td className="px-3 py-2 align-top">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleSaveRow(row)}
+                                disabled={rstatus === 'saving'}
+                                className="flex items-center gap-1 rounded border border-amber-500 px-2 py-1 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+                                title="Save"
+                              >
+                                <Check size={13} />
+                                {rstatus === 'saving' ? '…' : rstatus === 'saved' ? 'OK' : ''}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRow(row.id)}
+                                className="flex items-center gap-1 rounded border border-slate-800 px-2 py-1 text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
+                                title="Delete"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                            {rstatus === 'error' && (
+                              <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Invalid cost/qty</p>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Add-row for this section */}
+                    <tr className="bg-panel/60">
+                      <td className="px-3 py-2 align-top">
+                        {newRow.componentId === CUSTOM_VALUE ? (
+                          <input
+                            type="text"
+                            placeholder={`Type your own ${label.toLowerCase()} name`}
+                            value={newRow.customName}
+                            onChange={(e) =>
+                              setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], customName: e.target.value } }))
+                            }
+                            className={inputClass}
+                          />
+                        ) : (
+                          <select
+                            value={newRow.componentId}
+                            onChange={(e) =>
+                              setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], componentId: e.target.value } }))
+                            }
+                            className={inputClass}
+                          >
+                            <option value="">Select {label.toLowerCase()}…</option>
+                            {availableComponentsByType[type].map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.brand} {c.model}
+                              </option>
+                            ))}
+                            <option value={CUSTOM_VALUE}>+ Type your own…</option>
+                          </select>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 align-top">
                         <input
                           type="number"
-                          step="1"
-                          min="1"
-                          value={draft.packageQty}
-                          onChange={(e) => updateDraft(row.id, 'packageQty', e.target.value)}
-                          className={`${inputClass} w-20`}
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={newRow.unitCost}
+                          onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], unitCost: e.target.value } }))}
+                          className={`${inputClass} w-24`}
                         />
-                        <span className="text-[10px] text-slate-500">{PACKAGE_QTY_UNIT[displayType]}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        placeholder="optional"
-                        value={draft.quantityOnHand}
-                        onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
-                        className={`${inputClass} w-24`}
-                      />
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      {displayType === 'brass' ? (
+                      </td>
+                      <td className="px-3 py-2 align-top">
                         <input
                           type="number"
-                          step="1"
-                          min="1"
-                          placeholder="1"
-                          value={draft.reloadCycles}
-                          onChange={(e) => updateDraft(row.id, 'reloadCycles', e.target.value)}
-                          className={`${inputClass} w-20`}
+                          step={isPowder ? '0.1' : '1'}
+                          min={isPowder ? '0.1' : '1'}
+                          placeholder="0"
+                          value={newRow.packageQty}
+                          onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], packageQty: e.target.value } }))}
+                          className={`${inputClass} w-24`}
                         />
-                      ) : (
-                        <span className="text-slate-700">—</span>
+                      </td>
+                      <td className="px-3 py-2 align-top text-slate-600">—</td>
+                      <td className="px-3 py-2 align-top">
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          placeholder="optional"
+                          value={newRow.quantityOnHand}
+                          onChange={(e) =>
+                            setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], quantityOnHand: e.target.value } }))
+                          }
+                          className={`${inputClass} w-24`}
+                        />
+                      </td>
+                      {type === 'brass' && (
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            placeholder="1"
+                            value={newRow.reloadCycles}
+                            onChange={(e) =>
+                              setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], reloadCycles: e.target.value } }))
+                            }
+                            className={`${inputClass} w-20`}
+                          />
+                        </td>
                       )}
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="flex items-center gap-2">
+                      <td className="px-3 py-2 align-top">
                         <button
-                          onClick={() => handleSaveRow(row)}
+                          onClick={() => handleAddRow(type)}
                           disabled={status === 'saving'}
                           className="flex items-center gap-1 rounded border border-amber-500 px-2 py-1 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
-                          title="Save"
                         >
-                          <Check size={13} />
-                          {status === 'saving' ? '…' : status === 'saved' ? 'OK' : ''}
+                          <Plus size={13} />
+                          {status === 'saving' ? '…' : 'ADD'}
                         </button>
-                        <button
-                          onClick={() => handleDeleteRow(row.id)}
-                          className="flex items-center gap-1 rounded border border-slate-800 px-2 py-1 text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                      {status === 'error' && (
-                        <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Invalid cost/qty</p>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                        {status === 'error' && (
+                          <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Check the fields above</p>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
 
-              {/* Add-row */}
-              <tr className="bg-panel/60">
-                <td className="px-3 py-2 align-top">
-                  {newRow.componentId === CUSTOM_VALUE ? (
-                    <input
-                      type="text"
-                      placeholder="Type your own component name"
-                      value={newRow.customName}
-                      onChange={(e) => setNewRow((prev) => ({ ...prev, customName: e.target.value }))}
-                      className={inputClass}
-                    />
-                  ) : (
-                    <select
-                      value={newRow.componentId}
-                      onChange={(e) => setNewRow((prev) => ({ ...prev, componentId: e.target.value }))}
-                      className={inputClass}
-                    >
-                      <option value="">Select component…</option>
-                      {availableComponents.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.brand} {c.model}
-                        </option>
-                      ))}
-                      <option value={CUSTOM_VALUE}>+ Type your own…</option>
-                    </select>
-                  )}
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <select
-                    value={newRow.type}
-                    onChange={(e) =>
-                      setNewRow((prev) => ({ ...prev, type: e.target.value, componentId: '' }))
-                    }
-                    className={inputClass}
-                  >
-                    {TYPE_OPTIONS.map(([type, label]) => (
-                      <option key={type} value={type}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={newRow.unitCost}
-                    onChange={(e) => setNewRow((prev) => ({ ...prev, unitCost: e.target.value }))}
-                    className={`${inputClass} w-24`}
-                  />
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      placeholder="0"
-                      value={newRow.packageQty}
-                      onChange={(e) => setNewRow((prev) => ({ ...prev, packageQty: e.target.value }))}
-                      className={`${inputClass} w-20`}
-                    />
-                    <span className="text-[10px] text-slate-500">{PACKAGE_QTY_UNIT[newRow.type]}</span>
-                  </div>
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder="optional"
-                    value={newRow.quantityOnHand}
-                    onChange={(e) => setNewRow((prev) => ({ ...prev, quantityOnHand: e.target.value }))}
-                    className={`${inputClass} w-24`}
-                  />
-                </td>
-                <td className="px-3 py-2 align-top">
-                  {newRow.type === 'brass' ? (
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      placeholder="1"
-                      value={newRow.reloadCycles}
-                      onChange={(e) => setNewRow((prev) => ({ ...prev, reloadCycles: e.target.value }))}
-                      className={`${inputClass} w-20`}
-                    />
-                  ) : (
-                    <span className="text-slate-700">—</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <button
-                    onClick={handleAddRow}
-                    disabled={addStatus === 'saving'}
-                    className="flex items-center gap-1 rounded border border-amber-500 px-2 py-1 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
-                  >
-                    <Plus size={13} />
-                    {addStatus === 'saving' ? 'ADDING…' : 'ADD'}
-                  </button>
-                  {addStatus === 'error' && (
-                    <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">
-                      Pick/name a component and a valid cost + qty
-                    </p>
-                  )}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <p className="mt-3 text-[11px] text-slate-600">
+      <p className="mt-1 text-[11px] text-slate-600">
         Custom components (marked "custom") are private to your account and used for your own
         cost tracking — they won't appear in the New Recipe form or affect a recipe's Cost/Round
         unless the same component also exists in the shared catalog.

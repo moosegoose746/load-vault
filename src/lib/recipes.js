@@ -88,6 +88,16 @@ function mapRecipeRow(row, session, shots, inventory) {
     coalInches: row.coal_inches,
     primer: componentLabel(row.primer),
     brass: componentLabel(row.brass),
+    // Raw component ids, kept alongside the display-label strings above, so
+    // the Save-to-Vault flow can look each one up in the user's own
+    // user_inventory rows for auto-deduction (see
+    // computeSessionDeduction/applySessionDeduction in lib/inventory.js).
+    // Not needed by anything that only renders the recipe (Sidebar etc.),
+    // just by the deduction feature in Dashboard.
+    powderId: row.powder?.id ?? null,
+    bulletId: row.bullet?.id ?? null,
+    primerId: row.primer?.id ?? null,
+    brassId: row.brass?.id ?? null,
     rifleModel: row.rifle_model || '—',
     distanceYards: session?.distance_yards ?? 100,
     groupSizeMoa: session?.group_size_moa ?? null,

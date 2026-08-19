@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Save, Share2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Boxes, Save, Share2 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import RecipeChecklist from './RecipeChecklist.jsx';
@@ -9,6 +9,7 @@ import ChronoImport from './ChronoImport.jsx';
 import { useSync } from '../context/SyncContext.jsx';
 import { createRangeSession } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
+import { applySessionDeduction, computeSessionDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
@@ -19,6 +20,17 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const { saveSession, pendingCount, status } = useSync();
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [saveError, setSaveError] = useState('');
+
+  // Auto-deduct-on-save: a separate, editable "Total Rounds Fired" count
+  // (NOT the same as the number of chrono'd shots — plenty of range days
+  // include sighters/warm-ups that never got a velocity reading, or shots
+  // that just weren't logged), a per-session opt-out, and the fetched
+  // inventory rows needed to preview the deduction before it's written.
+  const [inventoryMap, setInventoryMap] = useState({});
+  const [roundsFired, setRoundsFired] = useState('');
+  const [roundsFiredEdited, setRoundsFiredEdited] = useState(false);
+  const [deductEnabled, setDeductEnabled] = useState(true);
+  const [deductionResult, setDeductionResult] = useState(null); // { succeeded, failed } after a save
 
   const isRealRecipe = Boolean(activeRecipeId);
 
@@ -38,6 +50,56 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const displayStdDevFps = liveStats ? Number(liveStats.sd.toFixed(1)) : recipe.stdDevFps;
   const displayExtremeSpread = liveStats ? liveStats.es : recipe.extremeSpread;
   const displayShots = chronoShots && chronoShots.length ? chronoShots : recipe.shots;
+
+  // Fetch the signed-in user's inventory once per real recipe so the
+  // deduction preview has something to compute against. Not fetched at all
+  // for the demo recipe (isRealRecipe false) since there's no real
+  // component id to match against anyway.
+  useEffect(() => {
+    if (!isRealRecipe || !authUser) {
+      setInventoryMap({});
+      return;
+    }
+    fetchUserInventoryMap(authUser.id)
+      .then(setInventoryMap)
+      .catch((err) => console.error('Failed to load inventory for deduction preview', err));
+  }, [isRealRecipe, authUser, activeRecipeId]);
+
+  // Default Rounds Fired to however many shots are showing (chrono'd or
+  // manually typed) — a reasonable starting guess — but never overwrite it
+  // once the user has actually touched the field themselves, and reset the
+  // "touched" flag whenever the active recipe changes so switching recipes
+  // doesn't carry over a stale count.
+  useEffect(() => {
+    setRoundsFiredEdited(false);
+    setDeductionResult(null);
+  }, [activeRecipeId]);
+
+  useEffect(() => {
+    if (!roundsFiredEdited) {
+      setRoundsFired(displayShots?.length ? String(displayShots.length) : '');
+    }
+  }, [displayShots?.length, roundsFiredEdited]);
+
+  const recipeComponents = useMemo(
+    () => ({
+      powderId: recipe.powderId,
+      powderLabel: recipe.powder,
+      chargeGrains: recipe.chargeGrains,
+      bulletId: recipe.bulletId,
+      bulletLabel: recipe.bullet,
+      primerId: recipe.primerId,
+      primerLabel: recipe.primer,
+      brassId: recipe.brassId,
+      brassLabel: recipe.brass,
+    }),
+    [recipe]
+  );
+
+  const deductionPreview = useMemo(
+    () => (deductEnabled ? computeSessionDeduction(recipeComponents, inventoryMap, roundsFired) : []),
+    [deductEnabled, recipeComponents, inventoryMap, roundsFired]
+  );
 
   const handleSave = async () => {
     setSaveError('');
@@ -66,6 +128,18 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           shots: chronoShots ?? [],
           imageBlob: target.imageBlob,
         });
+
+        // Deduction happens AFTER the session itself is confirmed saved —
+        // if this part fails, the range session is still logged; only the
+        // inventory numbers might be stale, which is recoverable by hand.
+        if (deductEnabled && deductionPreview.some((l) => l.tracked)) {
+          const result = await applySessionDeduction(authUser.id, deductionPreview);
+          setDeductionResult(result);
+          fetchUserInventoryMap(authUser.id).then(setInventoryMap).catch(() => {});
+        } else {
+          setDeductionResult(null);
+        }
+
         setSaveState('saved');
         onSessionSaved?.();
         setTimeout(() => setSaveState('idle'), 2000);
@@ -132,6 +206,74 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       <div className="mb-4">
         <ChronoImport onImportComplete={setChronoShots} />
       </div>
+
+      {isRealRecipe && (
+        <div className="mb-4 rounded border border-slate-800 bg-panel p-4">
+          <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
+            <Boxes size={14} />
+            Inventory Deduction
+          </h2>
+          <p className="mb-3 text-xs text-slate-400">
+            How many rounds did you actually fire today? This can be different from the number of
+            chrono'd shots above — include sighters, warm-ups, or anything you didn't log a
+            velocity for.
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase text-slate-500">Total Rounds Fired</span>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={roundsFired}
+                onChange={(e) => {
+                  setRoundsFired(e.target.value);
+                  setRoundsFiredEdited(true);
+                }}
+                className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-2 font-mono text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={deductEnabled}
+                onChange={(e) => setDeductEnabled(e.target.checked)}
+                className="h-4 w-4 accent-amber-500"
+              />
+              Deduct from my inventory on save
+            </label>
+          </div>
+
+          {deductEnabled && deductionPreview.length > 0 && (
+            <div className="mt-3 flex flex-col gap-1 border-t border-slate-800 pt-3">
+              {deductionPreview.map((line) => (
+                <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
+                  <span className="text-slate-200">{line.label}</span>: −{line.totalAmount} {line.unitLabel}
+                  {line.tracked ? (
+                    <>
+                      {' '}
+                      ({line.currentQty} → {Number(line.newQty.toFixed(2))} {line.unitLabel})
+                    </>
+                  ) : (
+                    <span className="text-slate-600"> — not tracked in your inventory, skipped</span>
+                  )}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {deductionResult && (
+            <p className="mt-3 font-mono text-[11px] text-emerald-400">
+              Inventory updated for {deductionResult.succeeded} component
+              {deductionResult.succeeded === 1 ? '' : 's'}
+              {deductionResult.failed > 0 && (
+                <span className="text-red-400"> ({deductionResult.failed} failed to update)</span>
+              )}
+              .
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <button

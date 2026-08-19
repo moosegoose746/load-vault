@@ -102,3 +102,84 @@ export async function deleteInventoryEntry(rowId) {
   const { error } = await supabase.from('user_inventory').delete().eq('id', rowId);
   if (error) throw error;
 }
+
+// --- Automated deduction on Save to Vault -----------------------------
+//
+// Range-day shot counts are inherently a little fuzzy (sighters, warm-up
+// rounds, shots that never got chrono'd) — so deduction is built around a
+// single editable "Total Rounds Fired" number the user confirms at save
+// time, defaulted from the velocity log but not required to match it, and
+// a preview of exactly what will change *before* anything is written. See
+// computeSessionDeduction (pure, for the preview) and
+// applySessionDeduction (the actual write) below, both used from
+// Dashboard's Save to Vault flow.
+
+export const GRAINS_PER_LB = 7000;
+
+/** Pure preview calculation — no network calls, safe to recompute on every
+ * keystroke of the Rounds Fired field. `recipeComponents` is
+ * { powderId, powderLabel, chargeGrains, bulletId, bulletLabel, primerId,
+ * primerLabel, brassId, brassLabel } (see mapRecipeRow in recipes.js).
+ * `inventoryMap` is from fetchUserInventoryMap (component_id -> row).
+ * Returns one line per component slot that's actually filled in on the
+ * recipe; `tracked: false` means that component either isn't in the
+ * user's inventory at all or has no Qty On Hand set, so there's nothing
+ * to subtract from — those lines still show in the preview (so it's
+ * obvious nothing will happen for them) but are skipped by
+ * applySessionDeduction. */
+export function computeSessionDeduction(recipeComponents, inventoryMap, roundsFired) {
+  const rounds = Number(roundsFired);
+  if (!Number.isFinite(rounds) || rounds <= 0) return [];
+
+  const lines = [];
+  const pushLine = (componentId, label, type, perRoundAmount, unitLabel) => {
+    if (!componentId) return;
+    const totalAmount = perRoundAmount * rounds;
+    const entry = inventoryMap?.[componentId];
+    if (!entry || entry.quantity_on_hand == null) {
+      lines.push({ componentId, label, type, totalAmount, unitLabel, tracked: false });
+      return;
+    }
+    const newQty = Math.max(0, entry.quantity_on_hand - totalAmount);
+    lines.push({
+      componentId,
+      rowId: entry.id,
+      label,
+      type,
+      totalAmount,
+      unitLabel,
+      tracked: true,
+      currentQty: entry.quantity_on_hand,
+      newQty,
+    });
+  };
+
+  pushLine(recipeComponents.powderId, recipeComponents.powderLabel, 'powder', recipeComponents.chargeGrains ?? 0, 'grains');
+  pushLine(recipeComponents.bulletId, recipeComponents.bulletLabel, 'bullet', 1, 'count');
+  pushLine(recipeComponents.primerId, recipeComponents.primerLabel, 'primer', 1, 'count');
+  pushLine(recipeComponents.brassId, recipeComponents.brassLabel, 'brass', 1, 'count');
+  return lines;
+}
+
+/** Actually write the deduction — only the `tracked: true` lines from
+ * computeSessionDeduction have anything to update. Best-effort per line
+ * (one failed row doesn't roll back the others, since this always runs
+ * after the range session itself already saved successfully — losing a
+ * stock update shouldn't make it look like the session wasn't logged). */
+export async function applySessionDeduction(userId, lines) {
+  const trackedLines = (lines || []).filter((l) => l.tracked);
+  const results = await Promise.allSettled(
+    trackedLines.map((line) =>
+      supabase
+        .from('user_inventory')
+        .update({ quantity_on_hand: line.newQty, updated_at: new Date().toISOString() })
+        .eq('id', line.rowId)
+        .eq('user_id', userId)
+    )
+  );
+  const failed = results.filter((r) => r.status === 'rejected' || r.value?.error);
+  if (failed.length) {
+    console.error('Some inventory deductions failed to save', failed);
+  }
+  return { succeeded: trackedLines.length - failed.length, failed: failed.length };
+}
