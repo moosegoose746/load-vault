@@ -1,125 +1,181 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Trash2 } from 'lucide-react';
+import { Check, Plus, Trash2 } from 'lucide-react';
 import {
+  addInventoryEntry,
   deleteInventoryEntry,
   fetchAllComponents,
-  fetchUserInventory,
-  saveInventoryEntry,
+  fetchUserInventoryRows,
+  updateInventoryEntry,
 } from '../lib/inventory.js';
 
-const TYPE_LABELS = {
-  powder: 'Powder',
-  bullet: 'Bullet',
-  primer: 'Primer',
-  brass: 'Brass',
-};
+const TYPE_LABELS = { powder: 'Powder', bullet: 'Bullet', primer: 'Primer', brass: 'Brass' };
+const TYPE_OPTIONS = Object.entries(TYPE_LABELS);
 
 // Powder's package_qty is stored in GRAINS (matching charge_weight_grains
-// on a recipe), so the field label needs to say so explicitly — otherwise
-// "Package Qty" reads as "how many jugs" instead of "how many grains in
-// the container you bought."
-const PACKAGE_QTY_UNIT = {
-  powder: 'grains',
-  bullet: 'count',
-  primer: 'count',
-  brass: 'count',
-};
+// on a recipe), so the column header needs to say so explicitly —
+// otherwise "Package Qty" reads as "how many jugs" instead of "how many
+// grains in the container you bought."
+const PACKAGE_QTY_UNIT = { powder: 'grains', bullet: 'count', primer: 'count', brass: 'count' };
 
-function emptyDraft() {
-  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '' };
-}
+const CUSTOM_VALUE = '__custom__';
 
-function draftFromEntry(entry) {
-  if (!entry) return emptyDraft();
+function draftFromRow(row) {
   return {
-    unitCost: entry.unit_cost != null ? String(entry.unit_cost) : '',
-    packageQty: entry.package_qty != null ? String(entry.package_qty) : '',
-    quantityOnHand: entry.quantity_on_hand != null ? String(entry.quantity_on_hand) : '',
-    reloadCycles: entry.reload_cycles != null ? String(entry.reload_cycles) : '',
+    unitCost: row.unit_cost != null ? String(row.unit_cost) : '',
+    packageQty: row.package_qty != null ? String(row.package_qty) : '',
+    quantityOnHand: row.quantity_on_hand != null ? String(row.quantity_on_hand) : '',
+    reloadCycles: row.reload_cycles != null ? String(row.reload_cycles) : '',
   };
 }
 
+function emptyNewRow() {
+  return {
+    type: 'powder',
+    componentId: '',
+    customName: '',
+    unitCost: '',
+    packageQty: '',
+    quantityOnHand: '',
+    reloadCycles: '',
+  };
+}
+
+const inputClass =
+  'w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none';
+
 // Section 6 of the master doc: "Unit Economics & Inventory Analytics" —
 // personal component pricing (never the shared catalog's placeholder
-// prices) and stock, used to compute a real Cost-Per-Round on recipes.
-// See supabase/schema_inventory.sql and src/lib/inventory.js.
+// prices) and stock, laid out as a spreadsheet-style table. Each row is
+// either a shared catalog component (picked from a dropdown) or a fully
+// custom, private-to-you component typed in by hand — see
+// supabase/schema_inventory.sql for how the two are distinguished, and
+// src/lib/inventory.js for the data layer.
 export default function InventoryPage({ authUser }) {
   const [components, setComponents] = useState([]);
-  const [inventory, setInventory] = useState({});
+  const [rows, setRows] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [rowStatus, setRowStatus] = useState({}); // { [componentId]: 'saving' | 'saved' | 'error' }
+  const [rowStatus, setRowStatus] = useState({}); // { [rowId]: 'saving' | 'saved' | 'error' }
+  const [newRow, setNewRow] = useState(emptyNewRow());
+  const [addStatus, setAddStatus] = useState('idle'); // idle | saving | error
 
-  useEffect(() => {
+  const load = () => {
     if (!authUser) {
       setLoading(false);
       return;
     }
     setLoading(true);
     setError('');
-    Promise.all([fetchAllComponents(), fetchUserInventory(authUser.id)])
-      .then(([comps, inv]) => {
+    Promise.all([fetchAllComponents(), fetchUserInventoryRows(authUser.id)])
+      .then(([comps, invRows]) => {
         setComponents(comps);
-        setInventory(inv);
+        setRows(invRows);
         const nextDrafts = {};
-        comps.forEach((c) => {
-          nextDrafts[c.id] = draftFromEntry(inv[c.id]);
+        invRows.forEach((row) => {
+          nextDrafts[row.id] = draftFromRow(row);
         });
         setDrafts(nextDrafts);
       })
       .catch((err) => setError(err.message || 'Failed to load inventory.'))
       .finally(() => setLoading(false));
-  }, [authUser]);
-
-  const grouped = useMemo(() => {
-    const byType = { powder: [], bullet: [], primer: [], brass: [] };
-    components.forEach((c) => {
-      if (byType[c.type]) byType[c.type].push(c);
-    });
-    return byType;
-  }, [components]);
-
-  const updateDraft = (componentId, field, value) => {
-    setDrafts((prev) => ({ ...prev, [componentId]: { ...prev[componentId], [field]: value } }));
   };
 
-  const handleSave = async (componentId) => {
-    const draft = drafts[componentId];
+  useEffect(load, [authUser]);
+
+  // Catalog components already in the table (for this type) shouldn't show
+  // up again in the "add a row" dropdown — one row per catalog component,
+  // enforced by the DB's partial unique index too.
+  const usedComponentIds = useMemo(
+    () => new Set(rows.filter((r) => r.component_id).map((r) => r.component_id)),
+    [rows]
+  );
+
+  const availableComponents = useMemo(
+    () => components.filter((c) => c.type === newRow.type && !usedComponentIds.has(c.id)),
+    [components, newRow.type, usedComponentIds]
+  );
+
+  const updateDraft = (rowId, field, value) => {
+    setDrafts((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [field]: value } }));
+  };
+
+  const parseDraft = (draft) => {
     const unitCost = Number.parseFloat(draft.unitCost);
     const packageQty = Number.parseInt(draft.packageQty, 10);
     if (!Number.isFinite(unitCost) || unitCost < 0 || !Number.isInteger(packageQty) || packageQty <= 0) {
-      setRowStatus((prev) => ({ ...prev, [componentId]: 'error' }));
+      return null;
+    }
+    return {
+      unitCost,
+      packageQty,
+      quantityOnHand: draft.quantityOnHand !== '' ? Number.parseFloat(draft.quantityOnHand) : null,
+      reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
+    };
+  };
+
+  const handleSaveRow = async (row) => {
+    const parsed = parseDraft(drafts[row.id] ?? draftFromRow(row));
+    if (!parsed) {
+      setRowStatus((prev) => ({ ...prev, [row.id]: 'error' }));
       return;
     }
-    setRowStatus((prev) => ({ ...prev, [componentId]: 'saving' }));
+    setRowStatus((prev) => ({ ...prev, [row.id]: 'saving' }));
     try {
-      const saved = await saveInventoryEntry(authUser.id, componentId, {
-        unitCost,
-        packageQty,
-        quantityOnHand: draft.quantityOnHand !== '' ? Number.parseFloat(draft.quantityOnHand) : null,
-        reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
-      });
-      setInventory((prev) => ({ ...prev, [componentId]: saved }));
-      setRowStatus((prev) => ({ ...prev, [componentId]: 'saved' }));
-      setTimeout(() => setRowStatus((prev) => ({ ...prev, [componentId]: undefined })), 2000);
+      const saved = await updateInventoryEntry(row.id, parsed);
+      setRows((prev) => prev.map((r) => (r.id === row.id ? saved : r)));
+      setRowStatus((prev) => ({ ...prev, [row.id]: 'saved' }));
+      setTimeout(() => setRowStatus((prev) => ({ ...prev, [row.id]: undefined })), 2000);
     } catch (err) {
       console.error('Failed to save inventory entry', err);
-      setRowStatus((prev) => ({ ...prev, [componentId]: 'error' }));
+      setRowStatus((prev) => ({ ...prev, [row.id]: 'error' }));
     }
   };
 
-  const handleClear = async (componentId) => {
+  const handleDeleteRow = async (rowId) => {
     try {
-      await deleteInventoryEntry(authUser.id, componentId);
-      setInventory((prev) => {
+      await deleteInventoryEntry(rowId);
+      setRows((prev) => prev.filter((r) => r.id !== rowId));
+      setDrafts((prev) => {
         const next = { ...prev };
-        delete next[componentId];
+        delete next[rowId];
         return next;
       });
-      setDrafts((prev) => ({ ...prev, [componentId]: emptyDraft() }));
     } catch (err) {
-      console.error('Failed to clear inventory entry', err);
+      console.error('Failed to delete inventory entry', err);
+    }
+  };
+
+  const handleAddRow = async () => {
+    const isCustom = newRow.componentId === CUSTOM_VALUE;
+    if (isCustom && !newRow.customName.trim()) {
+      setAddStatus('error');
+      return;
+    }
+    if (!isCustom && !newRow.componentId) {
+      setAddStatus('error');
+      return;
+    }
+    const parsed = parseDraft(newRow);
+    if (!parsed) {
+      setAddStatus('error');
+      return;
+    }
+    setAddStatus('saving');
+    try {
+      const saved = await addInventoryEntry(authUser.id, {
+        componentId: isCustom ? null : newRow.componentId,
+        customName: isCustom ? newRow.customName.trim() : null,
+        customType: isCustom ? newRow.type : null,
+        ...parsed,
+      });
+      setRows((prev) => [...prev, saved]);
+      setDrafts((prev) => ({ ...prev, [saved.id]: draftFromRow(saved) }));
+      setNewRow(emptyNewRow());
+      setAddStatus('idle');
+    } catch (err) {
+      console.error('Failed to add inventory entry', err);
+      setAddStatus('error');
     }
   };
 
@@ -135,127 +191,254 @@ export default function InventoryPage({ authUser }) {
   }
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 p-4">
+    <main className="mx-auto w-full max-w-6xl flex-1 p-4">
       <div className="mb-4 flex flex-col gap-1">
         <h1 className="font-mono text-lg font-bold text-slate-100">MY INVENTORY & PRICING</h1>
         <p className="text-xs text-slate-400">
           Enter what YOU actually paid for each component you use — this is personal to your
           account, separate from the shared catalog, and drives the Cost / Round shown on your
-          recipes. Leave a component blank if you don't use it or don't want to track its price.
+          recipes. Pick a component from the catalog below, or add your own if it isn't listed.
         </p>
       </div>
 
       {loading && <p className="font-mono text-xs text-slate-400">Loading…</p>}
       {error && <p className="font-mono text-xs text-red-400">{error}</p>}
 
-      {!loading &&
-        !error &&
-        Object.entries(TYPE_LABELS).map(([type, label]) => (
-          <div key={type} className="mb-6">
-            <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">{label}</h2>
-            <div className="flex flex-col gap-2">
-              {grouped[type].length === 0 && (
-                <p className="font-mono text-[11px] text-slate-600">No {label.toLowerCase()} components yet.</p>
+      {!loading && !error && (
+        <div className="overflow-x-auto rounded border border-slate-800">
+          <table className="w-full min-w-[820px] border-collapse font-mono text-sm">
+            <thead>
+              <tr className="border-b border-slate-800 bg-panel text-left text-[10px] uppercase tracking-widest text-slate-500">
+                <th className="px-3 py-2">Component</th>
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Your Cost ($)</th>
+                <th className="px-3 py-2">Package Qty</th>
+                <th className="px-3 py-2">Qty On Hand</th>
+                <th className="px-3 py-2">Reload Cycles</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-4 text-center text-xs text-slate-600">
+                    No inventory yet — add a row below to start tracking your own pricing.
+                  </td>
+                </tr>
               )}
-              {grouped[type].map((component) => {
-                const draft = drafts[component.id] ?? emptyDraft();
-                const status = rowStatus[component.id];
-                const hasEntry = Boolean(inventory[component.id]);
+              {rows.map((row) => {
+                const displayType = row.component?.type ?? row.custom_type;
+                const displayName = row.component
+                  ? `${row.component.brand} ${row.component.model}`
+                  : row.custom_name;
+                const draft = drafts[row.id] ?? draftFromRow(row);
+                const status = rowStatus[row.id];
                 return (
-                  <div
-                    key={component.id}
-                    className="flex flex-wrap items-end gap-3 rounded border border-slate-800 bg-panel p-3"
-                  >
-                    <div className="min-w-[160px] flex-1">
-                      <p className="font-mono text-sm text-slate-100">
-                        {component.brand} {component.model}
-                      </p>
-                    </div>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="font-mono text-[10px] uppercase text-slate-500">Your Cost ($)</span>
+                  <tr key={row.id} className="border-b border-slate-800/60 last:border-0">
+                    <td className="px-3 py-2 align-top">
+                      <span className="text-slate-100">{displayName}</span>
+                      {!row.component && (
+                        <span className="ml-2 rounded border border-slate-700 px-1.5 py-0.5 text-[9px] uppercase text-slate-500">
+                          custom
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 align-top text-slate-400">{TYPE_LABELS[displayType]}</td>
+                    <td className="px-3 py-2 align-top">
                       <input
                         type="number"
                         step="0.01"
                         min="0"
                         value={draft.unitCost}
-                        onChange={(e) => updateDraft(component.id, 'unitCost', e.target.value)}
-                        className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                        onChange={(e) => updateDraft(row.id, 'unitCost', e.target.value)}
+                        className={`${inputClass} w-24`}
                       />
-                    </label>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="font-mono text-[10px] uppercase text-slate-500">
-                        Package Qty ({PACKAGE_QTY_UNIT[type]})
-                      </span>
-                      <input
-                        type="number"
-                        step="1"
-                        min="1"
-                        value={draft.packageQty}
-                        onChange={(e) => updateDraft(component.id, 'packageQty', e.target.value)}
-                        className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
-                      />
-                    </label>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="font-mono text-[10px] uppercase text-slate-500">Qty On Hand</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        value={draft.quantityOnHand}
-                        onChange={(e) => updateDraft(component.id, 'quantityOnHand', e.target.value)}
-                        placeholder="optional"
-                        className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
-                      />
-                    </label>
-
-                    {type === 'brass' && (
-                      <label className="flex flex-col gap-1">
-                        <span className="font-mono text-[10px] uppercase text-slate-500">Reload Cycles</span>
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex items-center gap-1.5">
                         <input
                           type="number"
                           step="1"
                           min="1"
-                          value={draft.reloadCycles}
-                          onChange={(e) => updateDraft(component.id, 'reloadCycles', e.target.value)}
-                          placeholder="1"
-                          className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                          value={draft.packageQty}
+                          onChange={(e) => updateDraft(row.id, 'packageQty', e.target.value)}
+                          className={`${inputClass} w-20`}
                         />
-                      </label>
-                    )}
-
-                    <button
-                      onClick={() => handleSave(component.id)}
-                      disabled={status === 'saving'}
-                      className="flex items-center gap-1.5 rounded border border-amber-500 px-3 py-1.5 font-mono text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
-                    >
-                      <Check size={14} />
-                      {status === 'saving' ? 'SAVING…' : status === 'saved' ? 'SAVED' : 'SAVE'}
-                    </button>
-
-                    {hasEntry && (
-                      <button
-                        onClick={() => handleClear(component.id)}
-                        className="flex items-center gap-1.5 rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
-                      >
-                        <Trash2 size={14} />
-                        CLEAR
-                      </button>
-                    )}
-
-                    {status === 'error' && (
-                      <p className="w-full font-mono text-[11px] text-red-400">
-                        Enter a valid cost and package quantity to save.
-                      </p>
-                    )}
-                  </div>
+                        <span className="text-[10px] text-slate-500">{PACKAGE_QTY_UNIT[displayType]}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        placeholder="optional"
+                        value={draft.quantityOnHand}
+                        onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
+                        className={`${inputClass} w-24`}
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      {displayType === 'brass' ? (
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          placeholder="1"
+                          value={draft.reloadCycles}
+                          onChange={(e) => updateDraft(row.id, 'reloadCycles', e.target.value)}
+                          className={`${inputClass} w-20`}
+                        />
+                      ) : (
+                        <span className="text-slate-700">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleSaveRow(row)}
+                          disabled={status === 'saving'}
+                          className="flex items-center gap-1 rounded border border-amber-500 px-2 py-1 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+                          title="Save"
+                        >
+                          <Check size={13} />
+                          {status === 'saving' ? '…' : status === 'saved' ? 'OK' : ''}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRow(row.id)}
+                          className="flex items-center gap-1 rounded border border-slate-800 px-2 py-1 text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
+                          title="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      {status === 'error' && (
+                        <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Invalid cost/qty</p>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
-            </div>
-          </div>
-        ))}
+
+              {/* Add-row */}
+              <tr className="bg-panel/60">
+                <td className="px-3 py-2 align-top">
+                  {newRow.componentId === CUSTOM_VALUE ? (
+                    <input
+                      type="text"
+                      placeholder="Type your own component name"
+                      value={newRow.customName}
+                      onChange={(e) => setNewRow((prev) => ({ ...prev, customName: e.target.value }))}
+                      className={inputClass}
+                    />
+                  ) : (
+                    <select
+                      value={newRow.componentId}
+                      onChange={(e) => setNewRow((prev) => ({ ...prev, componentId: e.target.value }))}
+                      className={inputClass}
+                    >
+                      <option value="">Select component…</option>
+                      {availableComponents.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.brand} {c.model}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_VALUE}>+ Type your own…</option>
+                    </select>
+                  )}
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <select
+                    value={newRow.type}
+                    onChange={(e) =>
+                      setNewRow((prev) => ({ ...prev, type: e.target.value, componentId: '' }))
+                    }
+                    className={inputClass}
+                  >
+                    {TYPE_OPTIONS.map(([type, label]) => (
+                      <option key={type} value={type}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={newRow.unitCost}
+                    onChange={(e) => setNewRow((prev) => ({ ...prev, unitCost: e.target.value }))}
+                    className={`${inputClass} w-24`}
+                  />
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      placeholder="0"
+                      value={newRow.packageQty}
+                      onChange={(e) => setNewRow((prev) => ({ ...prev, packageQty: e.target.value }))}
+                      className={`${inputClass} w-20`}
+                    />
+                    <span className="text-[10px] text-slate-500">{PACKAGE_QTY_UNIT[newRow.type]}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    placeholder="optional"
+                    value={newRow.quantityOnHand}
+                    onChange={(e) => setNewRow((prev) => ({ ...prev, quantityOnHand: e.target.value }))}
+                    className={`${inputClass} w-24`}
+                  />
+                </td>
+                <td className="px-3 py-2 align-top">
+                  {newRow.type === 'brass' ? (
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      placeholder="1"
+                      value={newRow.reloadCycles}
+                      onChange={(e) => setNewRow((prev) => ({ ...prev, reloadCycles: e.target.value }))}
+                      className={`${inputClass} w-20`}
+                    />
+                  ) : (
+                    <span className="text-slate-700">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <button
+                    onClick={handleAddRow}
+                    disabled={addStatus === 'saving'}
+                    className="flex items-center gap-1 rounded border border-amber-500 px-2 py-1 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+                  >
+                    <Plus size={13} />
+                    {addStatus === 'saving' ? 'ADDING…' : 'ADD'}
+                  </button>
+                  {addStatus === 'error' && (
+                    <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">
+                      Pick/name a component and a valid cost + qty
+                    </p>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px] text-slate-600">
+        Custom components (marked "custom") are private to your account and used for your own
+        cost tracking — they won't appear in the New Recipe form or affect a recipe's Cost/Round
+        unless the same component also exists in the shared catalog.
+      </p>
     </main>
   );
 }

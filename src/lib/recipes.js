@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js';
-import { fetchUserInventory } from './inventory.js';
+import { fetchUserInventoryMap } from './inventory.js';
 
 // Real Supabase-backed recipe data layer. Everything here maps Postgres
 // rows into the same flat "recipe view model" shape `src/data/mockRecipe.js`
@@ -149,7 +149,7 @@ export async function fetchRecipeDetail(recipeId, userId) {
     shots = (shotRows || []).map((r) => r.velocity_fps);
   }
 
-  const inventory = userId ? await fetchUserInventory(userId) : {};
+  const inventory = userId ? await fetchUserInventoryMap(userId) : {};
 
   return mapRecipeRow(row, latestSession, shots, inventory);
 }
