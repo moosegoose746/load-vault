@@ -309,9 +309,9 @@ function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEd
           </button>
         </div>
 
-        <div className="flex h-56 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-900">
+        <div className="flex h-72 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-900">
           {firearm.photo_url ? (
-            <img src={firearm.photo_url} alt="" className="h-full w-full object-cover" />
+            <img src={firearm.photo_url} alt="" className="h-full w-full object-contain" />
           ) : (
             <Camera size={40} className="text-slate-600" />
           )}
