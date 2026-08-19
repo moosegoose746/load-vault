@@ -105,9 +105,25 @@ function calculateLoadableFromStock(row, inventoryByComponent) {
   const parts = [];
   const add = (component, label, perRoundAmount, caliberSpecific) => {
     if (!component || !(perRoundAmount > 0)) return;
+    // Two different "nothing here" cases, and they mean different things:
+    // (1) the user has never entered ANY quantity for this component at
+    // all — genuinely unknown, skip it so a partial answer stays honest
+    // ("at least 40, limited by primers" shouldn't silently become "0"
+    // just because brass isn't tracked yet). (2) the user HAS entered
+    // quantity for this component, but every lot is tagged to a DIFFERENT
+    // caliber than this recipe (a real, if easy-to-make, data-entry
+    // mismatch) — that's not unknown, it's a genuine 0 usable for THIS
+    // recipe, and needs to count as a real bottleneck. Checking the raw
+    // per-component lots (before caliber filtering) for #1, then the
+    // caliber-matched lots (via candidateInventoryLots, same rule
+    // costForComponent/deduction use) for the real total, is what tells
+    // these apart — collapsing them into one check is the bug that made
+    // a caliber-mismatched bullet lot silently vanish from this estimate
+    // instead of correctly reporting 0.
+    const rawTrackedLots = (inventoryByComponent?.[component.id] || []).filter((l) => l.quantity_on_hand != null);
+    if (!rawTrackedLots.length) return;
     const lots = candidateInventoryLots(inventoryByComponent, component.id, caliberId, caliberSpecific);
     const trackedLots = lots.filter((l) => l.quantity_on_hand != null);
-    if (!trackedLots.length) return;
     const totalOnHand = trackedLots.reduce((sum, l) => sum + l.quantity_on_hand, 0);
     parts.push({ label, rounds: Math.floor(totalOnHand / perRoundAmount) });
   };
