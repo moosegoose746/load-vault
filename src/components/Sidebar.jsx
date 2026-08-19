@@ -127,11 +127,19 @@ function MoneySavedRow({ recipe, recipeId, onSaved }) {
 
   if (recipe.moneySaved != null) {
     return (
-      <HighlightRow label="Money Saved" value={`${formatMoney(recipe.moneySaved)} saved`} tone="emerald">
-        <button onClick={startEditing} aria-label="Edit factory price" className="text-emerald-400/70 hover:text-emerald-300">
-          <Pencil size={12} />
-        </button>
-      </HighlightRow>
+      <div className="flex flex-col gap-1">
+        <HighlightRow label="Money Saved" value={`${formatMoney(recipe.moneySaved)} saved`} tone="emerald">
+          <button onClick={startEditing} aria-label="Edit factory price" className="text-emerald-400/70 hover:text-emerald-300">
+            <Pencil size={12} />
+          </button>
+        </HighlightRow>
+        {/* Show the comparable factory price itself right here, not just
+            the derived savings — the user shouldn't have to open the
+            editor just to see what number they entered. */}
+        <p className="px-2 font-mono text-[10px] text-slate-500">
+          vs. {formatMoney(recipe.factoryPricePerRound)}/rd factory
+        </p>
+      </div>
     );
   }
 

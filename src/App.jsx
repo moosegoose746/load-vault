@@ -9,7 +9,12 @@ import RecipeForm from './components/RecipeForm.jsx';
 import InventoryPage from './components/InventoryPage.jsx';
 import FirearmsPage from './components/FirearmsPage.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
-import { archiveRecipe, fetchRecipeDetail, fetchUserRecipes } from './lib/recipes.js';
+import {
+  archiveRecipe,
+  fetchLifetimeMoneySaved,
+  fetchRecipeDetail,
+  fetchUserRecipes,
+} from './lib/recipes.js';
 
 // An on-page form rather than window.prompt() — native browser dialogs
 // get silently swallowed inside some embedded preview panels (e.g. VS
@@ -98,6 +103,12 @@ function AppShell() {
   // here so the Sidebar's MOA badge can reflect shots being plotted right
   // now, not just whatever was saved on the recipe's last range session.
   const [liveMoa, setLiveMoa] = useState(null);
+  // Account-wide "Lifetime Money Saved" — see fetchLifetimeMoneySaved in
+  // lib/recipes.js and the LifetimeSavedBadge in Header.jsx. Deliberately
+  // separate from activeRecipe/loadActiveRecipe below: this sums across
+  // EVERY recipe with a factory price set, not just whichever one is
+  // currently open, so it needs its own fetch + refresh.
+  const [lifetimeSaved, setLifetimeSaved] = useState(null);
 
   const refreshRecipeList = useCallback(async () => {
     if (!auth.user) return;
@@ -128,6 +139,26 @@ function AppShell() {
     }
   }, [activeRecipeId, auth.user]);
 
+  const refreshLifetimeSaved = useCallback(async () => {
+    if (!auth.user) return;
+    try {
+      const { total } = await fetchLifetimeMoneySaved(auth.user.id);
+      setLifetimeSaved(total);
+    } catch (err) {
+      console.error('Failed to load lifetime money saved', err);
+    }
+  }, [auth.user]);
+
+  // Fires after anything that could change either the active recipe's
+  // numbers OR the account-wide lifetime-saved total: a Loading Session
+  // logged, a range session saved, or a factory price set/edited (see
+  // Dashboard's onSessionSaved and Sidebar's onRecipeUpdated below). Both
+  // refreshes happen together since any of those events can move both
+  // numbers at once.
+  const handleRecipeDataChanged = useCallback(async () => {
+    await Promise.all([loadActiveRecipe(), refreshLifetimeSaved()]);
+  }, [loadActiveRecipe, refreshLifetimeSaved]);
+
   useEffect(() => {
     refreshRecipeList();
   }, [refreshRecipeList]);
@@ -135,6 +166,10 @@ function AppShell() {
   useEffect(() => {
     loadActiveRecipe();
   }, [loadActiveRecipe]);
+
+  useEffect(() => {
+    refreshLifetimeSaved();
+  }, [refreshLifetimeSaved]);
 
   // Reset the live MOA reading whenever the active recipe changes, so
   // switching recipes doesn't leave a stale reading from the previous one
@@ -178,7 +213,13 @@ function AppShell() {
           DEV MODE — AUTH BYPASSED (local only, set by VITE_SKIP_AUTH in .env)
         </div>
       )}
-      <Header user={user} onSignOut={auth.signOut} view={view} onChangeView={setView} />
+      <Header
+        user={user}
+        onSignOut={auth.signOut}
+        view={view}
+        onChangeView={setView}
+        lifetimeSaved={lifetimeSaved}
+      />
       {user ? (
         view === 'inventory' ? (
           <InventoryPage authUser={auth.user} />
@@ -193,7 +234,7 @@ function AppShell() {
               onSelectRecipe={setActiveRecipeId}
               onNewRecipe={() => setRecipeFormOpen(true)}
               onDeleteRecipe={handleDeleteRecipe}
-              onRecipeUpdated={loadActiveRecipe}
+              onRecipeUpdated={handleRecipeDataChanged}
               liveMoa={liveMoa}
             />
             <Dashboard
@@ -201,7 +242,7 @@ function AppShell() {
               recipe={activeRecipe}
               activeRecipeId={activeRecipeId}
               authUser={auth.user}
-              onSessionSaved={loadActiveRecipe}
+              onSessionSaved={handleRecipeDataChanged}
               onTargetChange={setLiveMoa}
             />
           </div>
@@ -215,6 +256,7 @@ function AppShell() {
         onClose={() => setRecipeFormOpen(false)}
         onCreated={(newId) => {
           refreshRecipeList();
+          refreshLifetimeSaved();
           setActiveRecipeId(newId);
         }}
         authUser={auth.user}

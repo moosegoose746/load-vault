@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Boxes, Crosshair, Layers, LogOut, Menu, Sun, X } from 'lucide-react';
+import { Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Sun, X } from 'lucide-react';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
 import { useSync } from '../context/SyncContext.jsx';
@@ -17,7 +17,28 @@ const VIEWS = [
   { key: 'firearms', label: 'FIREARMS', icon: Layers },
 ];
 
-export default function Header({ user, onSignOut, view = 'vault', onChangeView }) {
+// Lifetime Money Saved — see fetchLifetimeMoneySaved in lib/recipes.js.
+// An account-wide stat (across every recipe with a Comparable Factory
+// Price set), so it lives here in the Header rather than the per-recipe
+// Sidebar — visible no matter which view (Vault/Inventory/Firearms) the
+// user is on. `null` (nothing to show yet — no recipe has a factory
+// price/complete pricing) renders nothing at all rather than a
+// misleading $0.00.
+function LifetimeSavedBadge({ amount }) {
+  if (amount == null) return null;
+  return (
+    <div
+      className="flex items-center gap-1.5 rounded border border-emerald-700/60 bg-emerald-500/10 px-3 py-1.5 font-mono text-xs text-emerald-300"
+      title="Lifetime money saved vs. comparable factory ammo, across every recipe with a factory price set"
+    >
+      <PiggyBank size={14} />
+      <span className="font-bold">${amount.toFixed(2)}</span>
+      <span className="hidden text-emerald-400/80 md:inline">SAVED</span>
+    </div>
+  );
+}
+
+export default function Header({ user, onSignOut, view = 'vault', onChangeView, lifetimeSaved }) {
   const { rangeMode, toggleRangeMode } = useRangeMode();
   const { status: syncStatus } = useSync();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -36,6 +57,7 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView }
         {/* Desktop controls */}
         <div className="hidden items-center gap-3 sm:flex">
           <SyncStatusBadge status={syncStatus} />
+          <LifetimeSavedBadge amount={lifetimeSaved} />
           {onChangeView &&
             otherViews.map(({ key, label, icon: Icon }) => (
               <button
@@ -83,6 +105,7 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView }
       {mobileOpen && (
         <div className="flex flex-col gap-3 border-t border-slate-800 px-4 py-3 sm:hidden">
           <SyncStatusBadge status={syncStatus} />
+          <LifetimeSavedBadge amount={lifetimeSaved} />
           {onChangeView &&
             otherViews.map(({ key, label, icon: Icon }) => (
               <button

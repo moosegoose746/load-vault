@@ -401,6 +401,65 @@ export async function createRecipe(fields, userId) {
   return data;
 }
 
+/** Lifetime money saved across EVERY recipe the user has given a
+ * Comparable Factory Price — same math as the per-recipe `moneySaved` in
+ * mapRecipeRow ((factoryPrice - costPerRound) * total rounds ever
+ * loaded), just summed across recipes instead of shown one at a time.
+ * The user asked for this specifically so it can be shown somewhere as
+ * an account-wide "lifetime saved" number (see Header.jsx) — a natural
+ * extension of the per-recipe stat, not a new concept.
+ *
+ * Recipes with no factory price set, or where cost-per-round still can't
+ * be computed (a selected component has no saved inventory price yet),
+ * are skipped entirely rather than counted as $0 — an unpriced recipe
+ * has no real "saved" number yet, and letting it silently count as zero
+ * would understate the total for no good reason. Returns `total: null`
+ * (not 0) if nothing qualifies at all, so the caller can hide the badge
+ * entirely instead of showing a misleading $0.00 to a user who's never
+ * set a factory price on anything. */
+export async function fetchLifetimeMoneySaved(userId) {
+  const { data: rows, error } = await supabase
+    .from('load_recipes')
+    .select(
+      `
+      id, caliber_id, charge_weight_grains, factory_price_per_round,
+      powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
+      bullet:components!load_recipes_bullet_id_fkey ( id, brand, model ),
+      primer:components!load_recipes_primer_id_fkey ( id, brand, model ),
+      brass:components!load_recipes_brass_id_fkey ( id, brand, model )
+    `
+    )
+    .eq('user_id', userId)
+    .eq('is_archived', false)
+    .not('factory_price_per_round', 'is', null);
+  if (error) throw error;
+  if (!rows || !rows.length) return { total: null, recipesCounted: 0 };
+
+  const inventory = await fetchUserInventoryMap(userId);
+  const recipeIds = rows.map((r) => r.id);
+  const { data: batches, error: batchError } = await supabase
+    .from('load_batches')
+    .select('recipe_id, rounds_loaded')
+    .in('recipe_id', recipeIds);
+  if (batchError) throw batchError;
+
+  const loadedByRecipe = {};
+  (batches || []).forEach((b) => {
+    loadedByRecipe[b.recipe_id] = (loadedByRecipe[b.recipe_id] || 0) + (b.rounds_loaded || 0);
+  });
+
+  let total = null;
+  let recipesCounted = 0;
+  rows.forEach((row) => {
+    const costPerRound = calculateCostPerRound(row, inventory);
+    if (costPerRound == null) return; // pricing incomplete — skip, don't guess
+    const roundsLoaded = loadedByRecipe[row.id] || 0;
+    total = (total ?? 0) + (row.factory_price_per_round - costPerRound) * roundsLoaded;
+    recipesCounted += 1;
+  });
+  return { total, recipesCounted };
+}
+
 /** Set (or clear, passing null) a recipe's Comparable Factory Price —
  * there's no general recipe-edit UI yet (recipes are create-once via
  * RecipeForm.jsx), so this is a narrow, single-field update exposed
