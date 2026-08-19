@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from './hooks/useAuth.js';
 import { RangeModeProvider, useRangeMode } from './context/RangeModeContext.jsx';
 import { SyncProvider } from './context/SyncContext.jsx';
 import Header from './components/Header.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './components/Dashboard.jsx';
+import RecipeForm from './components/RecipeForm.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
+import { fetchRecipeDetail, fetchUserRecipes } from './lib/recipes.js';
 
 // An on-page form rather than window.prompt() — native browser dialogs
 // get silently swallowed inside some embedded preview panels (e.g. VS
@@ -69,6 +71,11 @@ function SignInGate({ onSignIn }) {
 // Vercel's environment variables, only in your own .env file, or it would
 // disable auth on the live site too. Lets you skip the magic-link round
 // trip while iterating on everything past the sign-in screen.
+//
+// Important: this only bypasses the sign-in *screen*. `auth.user` (the
+// real Supabase session) stays null unless you actually sign in for real,
+// so anything that writes to Supabase (RecipeForm, real range-session
+// saves) still needs a genuine session — see `authUser` passed below.
 const DEV_SKIP_AUTH = import.meta.env.VITE_SKIP_AUTH === 'true';
 const DEV_USER = { id: 'dev-local-user', email: 'dev@localhost' };
 
@@ -78,6 +85,46 @@ function AppShell() {
 
   const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
   const loading = DEV_SKIP_AUTH ? false : auth.loading;
+
+  const [userRecipes, setUserRecipes] = useState([]);
+  const [activeRecipeId, setActiveRecipeId] = useState(null); // null = demo recipe
+  const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
+  const [recipeFormOpen, setRecipeFormOpen] = useState(false);
+  const [recipeError, setRecipeError] = useState('');
+
+  const refreshRecipeList = useCallback(async () => {
+    if (!auth.user) return;
+    try {
+      const list = await fetchUserRecipes(auth.user.id);
+      setUserRecipes(list);
+    } catch (err) {
+      console.error('Failed to load recipe list', err);
+    }
+  }, [auth.user]);
+
+  const loadActiveRecipe = useCallback(async () => {
+    if (!activeRecipeId) {
+      setActiveRecipe(mockRecipe);
+      return;
+    }
+    try {
+      const detail = await fetchRecipeDetail(activeRecipeId);
+      setActiveRecipe(detail);
+      setRecipeError('');
+    } catch (err) {
+      console.error('Failed to load recipe', err);
+      setRecipeError('Failed to load that recipe.');
+      setActiveRecipe(mockRecipe);
+    }
+  }, [activeRecipeId]);
+
+  useEffect(() => {
+    refreshRecipeList();
+  }, [refreshRecipeList]);
+
+  useEffect(() => {
+    loadActiveRecipe();
+  }, [loadActiveRecipe]);
 
   if (loading) {
     return (
@@ -101,11 +148,33 @@ function AppShell() {
       <Header user={user} onSignOut={auth.signOut} />
       {user ? (
         <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
-          <Sidebar recipe={mockRecipe} />
-          <Dashboard recipe={mockRecipe} />
+          <Sidebar
+            recipe={activeRecipe}
+            userRecipes={userRecipes}
+            activeRecipeId={activeRecipeId}
+            onSelectRecipe={setActiveRecipeId}
+            onNewRecipe={() => setRecipeFormOpen(true)}
+          />
+          <Dashboard recipe={activeRecipe} activeRecipeId={activeRecipeId} authUser={auth.user} onSessionSaved={loadActiveRecipe} />
         </div>
       ) : (
         <SignInGate onSignIn={auth.signInWithEmail} />
+      )}
+
+      <RecipeForm
+        open={recipeFormOpen}
+        onClose={() => setRecipeFormOpen(false)}
+        onCreated={(newId) => {
+          refreshRecipeList();
+          setActiveRecipeId(newId);
+        }}
+        authUser={auth.user}
+      />
+
+      {recipeError && (
+        <p className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded border border-red-600 bg-red-950 px-4 py-2 font-mono text-xs text-red-300">
+          {recipeError}
+        </p>
       )}
     </div>
   );

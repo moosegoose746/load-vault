@@ -6,11 +6,9 @@ import { computeVelocityStats } from '../lib/stats.js';
 // Chrono CSV ingestion (Section 5C / Phase 4 of the execution guide).
 // Accepts a Garmin ShotView or LabRadar export, or any generic CSV with a
 // velocity column, and shows the parsed shot string with computed stats.
-//
-// Not yet wired to overwrite the recipe's saved velocity log — that needs
-// a real recipe-save flow, which doesn't exist yet (see the progress log's
-// Phase 4 notes). This is the import/preview step standing on its own.
-export default function ChronoImport() {
+// Reports the parsed shots up via `onImportComplete` so a parent (e.g.
+// Dashboard's "Save to Vault") can attach them to a real range session.
+export default function ChronoImport({ onImportComplete }) {
   const [result, setResult] = useState(null); // { shots, source } | null
   const [error, setError] = useState('');
 
@@ -23,8 +21,10 @@ export default function ChronoImport() {
     const parsed = parseChronoCSV(text);
     if (parsed.success) {
       setResult(parsed);
+      onImportComplete?.(parsed.shots);
     } else {
       setError(parsed.error);
+      onImportComplete?.(null);
     }
     e.target.value = ''; // allow re-selecting the same file
   };
