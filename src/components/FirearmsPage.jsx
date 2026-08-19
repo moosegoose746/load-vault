@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Camera, Plus, Target, Trash2, X } from 'lucide-react';
+import InfoTooltip from './InfoTooltip.jsx';
 import {
   barrelLifePercentUsed,
   createFirearm,
@@ -327,7 +328,15 @@ function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEd
 
         <div className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Rounds Fired</span>
+            <span className="flex items-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
+              Rounds Fired
+              <InfoTooltip align="left">
+                Starting Round Count (if you set one for a used firearm) plus every round logged
+                through this firearm on a saved range session. Barrel life below is your own
+                estimate — this app has no way to actually measure throat erosion, it's just
+                tracking rounds fired against whatever number you entered.
+              </InfoTooltip>
+            </span>
             <span className="font-mono text-sm text-slate-100">{totalRounds}</span>
           </div>
           {percentUsed != null && (
@@ -447,7 +456,15 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onOpen, onEdit, onDelete }
 
       <div className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
         <div className="flex items-center justify-between">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Rounds Fired</span>
+          <span className="flex items-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
+            Rounds Fired
+            <InfoTooltip align="left">
+              Starting Round Count (if you set one for a used firearm) plus every round logged
+              through this firearm on a saved range session. Barrel life below is your own
+              estimate — this app has no way to actually measure throat erosion, it's just
+              tracking rounds fired against whatever number you entered.
+            </InfoTooltip>
+          </span>
           <span className="font-mono text-sm text-slate-100">{totalRounds}</span>
         </div>
         {percentUsed != null && (

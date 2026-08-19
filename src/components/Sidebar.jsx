@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import MoaBadge from './MoaBadge.jsx';
+import InfoTooltip from './InfoTooltip.jsx';
 import { updateRecipeFactoryPrice } from '../lib/recipes.js';
 
 // Section 3: "Left Sidebar (Specs & Filter Panel) — Prominent MOA Badge,
@@ -12,10 +13,13 @@ import { updateRecipeFactoryPrice } from '../lib/recipes.js';
 // recipe to view, or create a new one. The specs below always reflect
 // whichever recipe (real or the built-in demo) is currently active.
 
-function SpecRow({ label, value }) {
+function SpecRow({ label, value, info }) {
   return (
     <div className="flex items-center justify-between border-b border-slate-800 py-1.5 last:border-none">
-      <span className="text-xs text-slate-400">{label}</span>
+      <span className="flex items-center text-xs text-slate-400">
+        {label}
+        {info && <InfoTooltip align="left">{info}</InfoTooltip>}
+      </span>
       <span className="font-mono text-sm text-slate-100">{value}</span>
     </div>
   );
@@ -26,14 +30,17 @@ function SpecRow({ label, value }) {
 // plain SpecRow, so they stand out from raw component specs (Caliber,
 // COAL, etc.) and from Loadable From Stock, which is more of a
 // secondary projection than a number you'd check at a glance.
-function HighlightRow({ label, value, tone = 'amber', children }) {
+function HighlightRow({ label, value, tone = 'amber', info, children }) {
   const toneClasses =
     tone === 'emerald'
       ? { bg: 'bg-emerald-500/10', label: 'text-emerald-400', value: 'text-emerald-300' }
       : { bg: 'bg-amber-500/10', label: 'text-amber-400', value: 'text-amber-300' };
   return (
     <div className={`flex items-center justify-between rounded ${toneClasses.bg} px-2 py-2`}>
-      <span className={`text-xs font-semibold uppercase tracking-wide ${toneClasses.label}`}>{label}</span>
+      <span className={`flex items-center text-xs font-semibold uppercase tracking-wide ${toneClasses.label}`}>
+        {label}
+        {info && <InfoTooltip align="left">{info}</InfoTooltip>}
+      </span>
       <div className="flex items-center gap-2">
         <span className={`font-mono text-base font-bold ${toneClasses.value}`}>{value}</span>
         {children}
@@ -128,7 +135,12 @@ function MoneySavedRow({ recipe, recipeId, onSaved }) {
   if (recipe.moneySaved != null) {
     return (
       <div className="flex flex-col gap-1">
-        <HighlightRow label="Money Saved" value={`${formatMoney(recipe.moneySaved)} saved`} tone="emerald">
+        <HighlightRow
+          label="Money Saved"
+          value={`${formatMoney(recipe.moneySaved)} saved`}
+          tone="emerald"
+          info="(factory price − your cost/round) × every round you've ever loaded of this recipe. Doesn't go down as ammo gets fired — it's lifetime savings, not what's currently on hand."
+        >
           <button onClick={startEditing} aria-label="Edit factory price" className="text-emerald-400/70 hover:text-emerald-300">
             <Pencil size={12} />
           </button>
@@ -247,10 +259,12 @@ export default function Sidebar({
           <HighlightRow
             label="Cost / Round"
             value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}
+            info='What one round of this recipe costs in components, from your own saved Inventory pricing. Shows "—" if any component doesn&apos;t have a saved price yet.'
           />
           <HighlightRow
             label="Loaded & Ready"
             value={recipe.roundsOnHand != null ? `${recipe.roundsOnHand} rounds` : '—'}
+            info="Rounds actually assembled and sitting ready to shoot right now — total rounds logged in a Loading Session, minus rounds logged as fired at the range."
           />
           <MoneySavedRow
             recipe={recipe}
@@ -266,6 +280,7 @@ export default function Sidebar({
               ? `${recipe.loadableFromStock} (${recipe.loadableBottleneck})`
               : '—'
           }
+          info="How many MORE rounds you could load from raw components you have on hand — a raw-materials estimate, not rounds already assembled (that's Loaded & Ready above). Limited by whichever tracked component would run out first."
         />
       </div>
     </aside>

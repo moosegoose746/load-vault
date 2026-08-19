@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, Plus, Trash2 } from 'lucide-react';
+import InfoTooltip from './InfoTooltip.jsx';
 import {
   GRAINS_PER_LB,
   addInventoryEntry,
@@ -342,10 +343,32 @@ export default function InventoryPage({ authUser }) {
                       <th className="px-3 py-2">Purchase Price ($)</th>
                       <th className="px-3 py-2">{isPowder ? 'Container Weight (lbs)' : 'Qty per Package'}</th>
                       <th className="px-3 py-2">{isPowder ? 'Cost/Grain' : 'Cost/Unit'}</th>
-                      <th className="px-3 py-2">Qty On Hand{isPowder ? ' (lbs)' : ''}</th>
+                      <th className="px-3 py-2">
+                        <span className="flex items-center">
+                          Qty On Hand{isPowder ? ' (lbs)' : ''}
+                          {type === 'brass' && (
+                            <InfoTooltip align="left">
+                              Total cases you own, whether they're sitting in a box or already
+                              loaded into ammo — firing a round doesn't remove it from here. The
+                              "available to load" note underneath shows how much of this is
+                              actually free right now vs. already tied up in loaded ammo.
+                            </InfoTooltip>
+                          )}
+                        </span>
+                      </th>
                       {type === 'brass' && (
                         <>
-                          <th className="px-3 py-2">Reload Cycles (est.)</th>
+                          <th className="px-3 py-2">
+                            <span className="flex items-center">
+                              Reload Cycles (est.)
+                              <InfoTooltip align="left">
+                                How many times you expect ONE case in this lot to survive being
+                                reloaded. Cycles Used counts the whole lot together (loading 100
+                                rounds adds 100, not 1) and compares it against this × Qty On
+                                Hand — the lot's total budget, not any single case's fire count.
+                              </InfoTooltip>
+                            </span>
+                          </th>
                           <th className="px-3 py-2">Cycles Used</th>
                         </>
                       )}

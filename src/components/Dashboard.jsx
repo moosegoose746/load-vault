@@ -6,6 +6,7 @@ import RecipeChecklist from './RecipeChecklist.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
 import ChronoImport from './ChronoImport.jsx';
+import InfoTooltip from './InfoTooltip.jsx';
 import { useSync } from '../context/SyncContext.jsx';
 import { createLoadBatch, createRangeSession } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
@@ -31,8 +32,20 @@ import { fetchUserFirearms } from '../lib/firearms.js';
 // single page regardless of which one a user is actually there for.
 const TABS = [
   { key: 'overview', label: 'OVERVIEW', icon: SlidersHorizontal, realOnly: false },
-  { key: 'loading', label: 'LOADING SESSION', icon: Boxes, realOnly: true },
-  { key: 'range', label: 'RANGE DAY', icon: Crosshair, realOnly: false },
+  {
+    key: 'loading',
+    label: 'LOADING SESSION',
+    icon: Boxes,
+    realOnly: true,
+    info: 'Assembling ammo at the bench — logging one here is what actually consumes powder/bullets/primers/brass from your Inventory. Do this whenever you sit down and load a batch, whether or not you shoot it right away.',
+  },
+  {
+    key: 'range',
+    label: 'RANGE DAY',
+    icon: Crosshair,
+    realOnly: false,
+    info: "Shooting rounds that are already loaded — target photos, chrono data, and Rounds Fired. This doesn't touch your component stock (that already happened at the bench); it only draws down Loaded & Ready.",
+  },
 ];
 
 export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange }) {
@@ -276,19 +289,24 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       </div>
 
       <div className="mb-4 flex gap-2 border-b border-slate-800">
-        {visibleTabs.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setDashboardTab(key)}
-            className={`flex items-center gap-1.5 border-b-2 px-3 py-2 font-mono text-xs transition-colors ${
-              dashboardTab === key
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <Icon size={14} />
-            {label}
-          </button>
+        {/* The explainer icon is a sibling of the tab button, not nested
+            inside it — a <button> inside a <button> is invalid HTML and
+            browsers handle the click/tap targeting inconsistently. */}
+        {visibleTabs.map(({ key, label, icon: Icon, info }) => (
+          <div key={key} className="flex items-center">
+            <button
+              onClick={() => setDashboardTab(key)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 font-mono text-xs transition-colors ${
+                dashboardTab === key
+                  ? 'border-amber-500 text-amber-400'
+                  : 'border-transparent text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+            {info && <InfoTooltip align="left">{info}</InfoTooltip>}
+          </div>
         ))}
       </div>
 
