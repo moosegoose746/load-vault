@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Sun, X } from 'lucide-react';
+import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Sun, X } from 'lucide-react';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
 import { useSync } from '../context/SyncContext.jsx';
 
 // Section 3: "Hero Header / Navigation Bar — Amber/gold logo, Sync Status
 // Badge, Range Mode Toggle, and Mobile Navigation." Also carries the
-// Vault/Inventory/Firearms view switcher — the app has no router, so
+// Vault/Inventory/Firearms/Workups view switcher — the app has no router, so
 // this is a simple local view-state toggle rather than real page
 // navigation. Renders one button per view OTHER than the current one
 // (so it scales past two views without becoming a single confusing
@@ -15,6 +15,7 @@ const VIEWS = [
   { key: 'vault', label: 'VAULT', icon: Crosshair },
   { key: 'inventory', label: 'INVENTORY', icon: Boxes },
   { key: 'firearms', label: 'FIREARMS', icon: Layers },
+  { key: 'workups', label: 'WORKUPS', icon: Beaker },
 ];
 
 // Lifetime Money Saved — see fetchLifetimeMoneySaved in lib/recipes.js.

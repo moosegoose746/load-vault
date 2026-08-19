@@ -8,6 +8,7 @@ import Dashboard from './components/Dashboard.jsx';
 import RecipeForm from './components/RecipeForm.jsx';
 import InventoryPage from './components/InventoryPage.jsx';
 import FirearmsPage from './components/FirearmsPage.jsx';
+import WorkupsPage from './components/WorkupsPage.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import {
   archiveRecipe,
@@ -231,6 +232,8 @@ function AppShell() {
               setView('vault');
             }}
           />
+        ) : view === 'workups' ? (
+          <WorkupsPage authUser={auth.user} />
         ) : (
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar
