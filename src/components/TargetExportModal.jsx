@@ -81,7 +81,7 @@ export default function TargetExportModal({
     // leftover width becomes plain side margins instead of distorting
     // the image.
     const HEADER_HEIGHT = 230;
-    const FOOTER_HEIGHT = 190;
+    const FOOTER_HEIGHT = 220;
     const PHOTO_SIZE = EXPORT_SIZE - HEADER_HEIGHT - FOOTER_HEIGHT;
     const PHOTO_TOP = HEADER_HEIGHT;
     const PHOTO_LEFT = (EXPORT_SIZE - PHOTO_SIZE) / 2;
@@ -154,41 +154,54 @@ export default function TargetExportModal({
     ctx.fillStyle = 'rgba(18, 22, 25, 0.95)';
     ctx.fillRect(0, footerTop, EXPORT_SIZE, FOOTER_HEIGHT);
 
+    // Watermark block kept small and narrow on purpose — it's branding,
+    // not the point of the card. Shrinking it (vs. the original 32px
+    // "PRECISION LOAD VAULT") frees up most of the footer's width for the
+    // load details below, which are the actually useful info for anyone
+    // screenshotting this off social media.
     ctx.fillStyle = '#fbbf24';
-    ctx.font = 'bold 26px monospace';
-    ctx.fillText('Verified with', 24, footerTop + 56);
-    ctx.font = 'bold 32px monospace';
-    ctx.fillText('PRECISION LOAD VAULT', 24, footerTop + 96);
-    ctx.font = '16px monospace';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('Verified with', 24, footerTop + 34);
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('PRECISION LOAD VAULT', 24, footerTop + 58);
+    ctx.font = '14px monospace';
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText(SHARE_URL.replace('https://', ''), 24, footerTop + 126);
+    ctx.fillText(SHARE_URL.replace('https://', ''), 24, footerTop + 80);
 
     const qrSize = FOOTER_HEIGHT - 40;
     const qrX = EXPORT_SIZE - qrSize - 32;
     const qrY = footerTop + 20;
 
     // Load details, filling the middle gap between the watermark text and
-    // the QR code — the actual useful info for anyone screenshotting this
-    // off social media, not just branding.
-    const loadX = 456;
-    const loadMaxWidth = qrX - 32 - loadX;
+    // the QR code. `loadX` starts right after the (now-narrow) watermark
+    // block with a fixed margin, and every line is truncated to
+    // `loadMaxWidth` (measured against the actual QR position, with a
+    // safety margin) so nothing can ever run into/under the QR code or
+    // off the edge of the card, no matter how long a component name is.
+    const loadX = 300;
+    const loadMaxWidth = qrX - 40 - loadX;
     if (loadMaxWidth > 80) {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#f1f5f9';
-      ctx.font = 'bold 26px monospace';
-      ctx.fillText(truncateText(ctx, recipe.title, loadMaxWidth), loadX, footerTop + 46);
+      ctx.font = 'bold 24px monospace';
+      ctx.fillText(truncateText(ctx, recipe.title, loadMaxWidth), loadX, footerTop + 34);
 
       ctx.fillStyle = '#fbbf24';
-      ctx.font = '26px monospace';
-      ctx.fillText(truncateText(ctx, recipe.caliber, loadMaxWidth), loadX, footerTop + 74);
+      ctx.font = '22px monospace';
+      ctx.fillText(truncateText(ctx, recipe.caliber, loadMaxWidth), loadX, footerTop + 58);
 
       ctx.fillStyle = '#94a3b8';
-      ctx.font = '24px monospace';
+      ctx.font = '20px monospace';
       const chargeLine = `${recipe.chargeGrains ?? '—'}gr ${recipe.powder} / ${recipe.bullet}`;
-      ctx.fillText(truncateText(ctx, chargeLine, loadMaxWidth), loadX, footerTop + 98);
+      ctx.fillText(truncateText(ctx, chargeLine, loadMaxWidth), loadX, footerTop + 80);
+
+      const primerBrassLine = [recipe.primer, recipe.brass].filter(Boolean).join(' · ');
+      if (primerBrassLine) {
+        ctx.fillText(truncateText(ctx, primerBrassLine, loadMaxWidth), loadX, footerTop + 102);
+      }
 
       if (recipe.coalInches) {
-        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 122);
+        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 124);
       }
     }
     if (qrImgRef.current) {
