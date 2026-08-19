@@ -424,7 +424,7 @@ function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
             <div>
               <h3 className="mb-1.5 flex items-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
                 Charge Weight vs. Velocity
-                <InfoTooltip>
+                <InfoTooltip align="left">
                   Each amber dot is one rung's average velocity; the smaller dim dots are its individual
                   shots. The dashed line is a fitted trend across rungs — a flat spot (velocity not
                   rising as much as the line predicts) is often a forgiving pressure/harmonic node.
@@ -437,7 +437,7 @@ function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
             <div>
               <h3 className="mb-1.5 flex items-center font-mono text-[10px] uppercase tracking-widest text-slate-500">
                 Rungs
-                <InfoTooltip>
+                <InfoTooltip align="left">
                   Each row is one charge weight you've tested — sorted lightest to heaviest, the order
                   you'd actually read a ladder test in. SD = standard deviation, how much shot-to-shot
                   velocity varies (lower = more consistent). ES = extreme spread, the fastest shot minus
