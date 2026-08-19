@@ -4,6 +4,13 @@ import { supabase } from './supabaseClient.js';
 // why this is a separate per-user table rather than reusing the shared
 // `components.unit_cost` catalog field, and for the catalog-linked vs.
 // custom/freeform row design.
+//
+// As of schema_inventory_v4.sql, a single catalog component can have MORE
+// THAN ONE user_inventory row — separate lots (e.g. two boxes of the same
+// primers bought at different times) or, for bullet/brass, the same
+// catalog item in different calibers. So every function below that keys
+// data by component_id returns/expects an ARRAY of rows per component, not
+// a single row — see fetchUserInventoryMap.
 
 /** Every non-deleted catalog component (all types), for the Inventory
  * page's "add a row" dropdown — separate from fetchComponentsByType in
@@ -21,14 +28,15 @@ export async function fetchAllComponents() {
 }
 
 /** This user's saved inventory rows, each joined with its catalog
- * component (when it has one), for rendering the spreadsheet-style
- * Inventory page. A row is either catalog-linked (row.component set) or
- * custom/freeform (row.custom_name/row.custom_type set, row.component
- * null) — see schema_inventory.sql. */
+ * component (when it has one) and its caliber (when set), for rendering
+ * the spreadsheet-style Inventory page. A row is either catalog-linked
+ * (row.component set) or custom/freeform (row.custom_name/row.custom_type
+ * set, row.component null) — see schema_inventory.sql. Ordered oldest
+ * first, same as fetchUserInventoryMap, so the two stay consistent. */
 export async function fetchUserInventoryRows(userId) {
   const { data, error } = await supabase
     .from('user_inventory')
-    .select('*, component:components ( id, type, brand, model )')
+    .select('*, component:components ( id, type, brand, model ), caliber:calibers ( id, name )')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -36,26 +44,52 @@ export async function fetchUserInventoryRows(userId) {
 }
 
 /** This user's saved price/stock entries for CATALOG components only,
- * keyed by component_id — the shape recipes.js's cost-per-round
- * calculation needs. Custom/freeform rows aren't linked to any recipe's
- * component_id, so they're intentionally excluded here (they don't affect
- * Cost/Round on a recipe, only the Inventory page's own display). */
+ * grouped by component_id into arrays of rows ("lots"), oldest lot first —
+ * the shape recipes.js's cost-per-round/loadable-from-stock calculations
+ * and computeBatchDeduction below all need, so multiple lots of the same
+ * component (or the same component in different calibers) can be told
+ * apart and drawn down in order. Custom/freeform rows aren't linked to any
+ * recipe's component_id, so they're intentionally excluded here (they
+ * don't affect a recipe's numbers, only the Inventory page's own
+ * display). */
 export async function fetchUserInventoryMap(userId) {
   const { data, error } = await supabase
     .from('user_inventory')
-    .select('*')
+    .select('*, caliber:calibers ( id, name )')
     .eq('user_id', userId)
-    .not('component_id', 'is', null);
+    .not('component_id', 'is', null)
+    .order('created_at', { ascending: true });
   if (error) throw error;
   const byComponentId = {};
   (data || []).forEach((row) => {
-    byComponentId[row.component_id] = row;
+    if (!byComponentId[row.component_id]) byComponentId[row.component_id] = [];
+    byComponentId[row.component_id].push(row);
   });
   return byComponentId;
 }
 
-/** Add a new inventory row — either catalog-linked (pass componentId) or
- * custom/freeform (pass customName + customType instead). */
+/** Pick which of a component's inventory lots are relevant. For
+ * caliber-specific slots (bullet, brass) this prefers lots whose
+ * caliber_id matches the recipe's own caliberId; if none match, it falls
+ * back to lots with NO caliber_id set at all (untagged — a grace period
+ * for lots added before caliber tracking existed, or anyone who leaves it
+ * blank) rather than silently matching nothing. Powder and primer aren't
+ * caliber-specific at all, so every lot for that component is a
+ * candidate. Shared by computeBatchDeduction here and the cost/
+ * loadable-from-stock math in recipes.js so both use the exact same
+ * matching rule. */
+export function candidateInventoryLots(inventoryByComponent, componentId, caliberId, caliberSpecific) {
+  const lots = (componentId && inventoryByComponent?.[componentId]) || [];
+  if (!caliberSpecific) return lots;
+  const matched = caliberId ? lots.filter((l) => l.caliber_id === caliberId) : [];
+  if (matched.length) return matched;
+  return lots.filter((l) => l.caliber_id == null);
+}
+
+/** Add a new inventory row (a "lot") — either catalog-linked (pass
+ * componentId) or custom/freeform (pass customName + customType instead).
+ * A component can have any number of lots; nothing here enforces
+ * uniqueness. */
 export async function addInventoryEntry(userId, fields) {
   const { data, error } = await supabase
     .from('user_inventory')
@@ -68,11 +102,11 @@ export async function addInventoryEntry(userId, fields) {
       package_qty: fields.packageQty,
       quantity_on_hand: fields.quantityOnHand ?? null,
       reload_cycles: fields.reloadCycles ?? null,
-      caliber: fields.caliber || null,
+      caliber_id: fields.caliberId || null,
       primer_size: fields.primerSize || null,
       notes: fields.notes || null,
     })
-    .select('*, component:components ( id, type, brand, model )')
+    .select('*, component:components ( id, type, brand, model ), caliber:calibers ( id, name )')
     .single();
   if (error) throw error;
   return data;
@@ -81,7 +115,7 @@ export async function addInventoryEntry(userId, fields) {
 /** Update an existing row's editable fields (price/qty/reload cycles/
  * cycles used/caliber/primer size) by its own id — component/custom
  * identity isn't editable once created; delete and re-add instead.
- * `cyclesUsed` is only meaningful for brass, `caliber` for bullet/brass,
+ * `cyclesUsed` is only meaningful for brass, `caliberId` for bullet/brass,
  * `primerSize` for primer, but harmless to send as null for other
  * types. */
 export async function updateInventoryEntry(rowId, fields) {
@@ -93,13 +127,13 @@ export async function updateInventoryEntry(rowId, fields) {
       quantity_on_hand: fields.quantityOnHand ?? null,
       reload_cycles: fields.reloadCycles ?? null,
       cycles_used: fields.cyclesUsed ?? 0,
-      caliber: fields.caliber || null,
+      caliber_id: fields.caliberId || null,
       primer_size: fields.primerSize || null,
       notes: fields.notes || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', rowId)
-    .select('*, component:components ( id, type, brand, model )')
+    .select('*, component:components ( id, type, brand, model ), caliber:calibers ( id, name )')
     .single();
   if (error) throw error;
   return data;
@@ -142,99 +176,151 @@ export function isBrassNearingRetirement(row) {
 // and shooting are two separate events, since a batch might sit loaded
 // for weeks before any of it gets fired, and a single range day might
 // only fire part of one). So this deduction now runs off "Rounds Loaded"
-// on Dashboard's "Log a Loading Session" panel (previously it ran off
-// "Total Rounds Fired" on the range-session save — renamed from
-// computeSessionDeduction/applySessionDeduction accordingly). A preview
-// of exactly what will change is shown *before* anything is written.
+// on Dashboard's "Log a Loading Session" panel. A preview of exactly what
+// will change is shown *before* anything is written.
+//
+// Bullet and brass are caliber-specific (see candidateInventoryLots
+// above) — only lots matching the recipe's own caliber (or untagged lots,
+// as a fallback) are touched. Powder and primer aren't caliber-specific.
+// When more than one lot qualifies, they're drawn down oldest-first
+// (FIFO): one lot empties out before the next is touched, so nothing
+// needs to ask "which lot?" up front.
 //
 // Brass is handled differently from powder/bullet/primer: loading a round
 // doesn't reduce how many cases you physically own (you still have the
 // brass — it's the powder/bullet/primer that get consumed) — instead it
-// increments a `cycles_used` counter, compared against that row's own
-// `reload_cycles` estimate to flag a batch nearing retirement (see
-// isBrassNearingRetirement above).
+// increments a `cycles_used` counter on the matching lot(s), compared
+// against that lot's own `reload_cycles` estimate, spilling into the next
+// matching lot once one hits its estimated max (see isBrassNearingRetirement
+// above).
 
 export const GRAINS_PER_LB = 7000;
 
 /** Pure preview calculation — no network calls, safe to recompute on every
  * keystroke of the Rounds Loaded field. `recipeComponents` is
  * { powderId, powderLabel, chargeGrains, bulletId, bulletLabel, primerId,
- * primerLabel, brassId, brassLabel } (see mapRecipeRow in recipes.js).
- * `inventoryMap` is from fetchUserInventoryMap (component_id -> row).
- * Returns one line per component slot that's actually filled in on the
- * recipe. Powder/bullet/primer lines have `kind: 'consume'`; the brass
- * line (if any) has `kind: 'cycles'` and different fields (see below).
- * `tracked: false` means there's nothing to write for that line (no
- * inventory row at all, or — for consume lines only — no Qty On Hand
- * set) — those lines still show in the preview so it's obvious nothing
- * will happen for them, but are skipped by applyBatchDeduction. */
-export function computeBatchDeduction(recipeComponents, inventoryMap, roundsLoaded) {
+ * primerLabel, brassId, brassLabel, caliberId } (see mapRecipeRow in
+ * recipes.js). `inventoryByComponent` is from fetchUserInventoryMap
+ * (component_id -> array of lots, oldest first). Returns one line PER LOT
+ * actually touched — a component with two matching lots can produce two
+ * consume/cycles lines. `tracked: false` means nothing will be written for
+ * that line: either there's no inventory lot at all for that component/
+ * caliber, or (for consume lines) more was needed than any known lot has
+ * on hand — that shortfall still shows in the preview so it's obvious
+ * nothing (or only partial) will happen, but is skipped by
+ * applyBatchDeduction. */
+export function computeBatchDeduction(recipeComponents, inventoryByComponent, roundsLoaded) {
   const rounds = Number(roundsLoaded);
   if (!Number.isFinite(rounds) || rounds <= 0) return [];
 
   const lines = [];
+  const caliberId = recipeComponents.caliberId ?? null;
 
-  const pushConsumeLine = (componentId, label, type, perRoundAmount, unitLabel) => {
+  const pushConsumeLines = (componentId, label, type, perRoundAmount, unitLabel, caliberSpecific) => {
     if (!componentId) return;
-    const totalAmount = perRoundAmount * rounds;
-    const entry = inventoryMap?.[componentId];
-    if (!entry || entry.quantity_on_hand == null) {
-      lines.push({ componentId, label, type, totalAmount, unitLabel, tracked: false, kind: 'consume' });
+    const totalNeeded = perRoundAmount * rounds;
+    if (!(totalNeeded > 0)) return;
+    const lots = candidateInventoryLots(inventoryByComponent, componentId, caliberId, caliberSpecific);
+    const trackedLots = lots.filter((l) => l.quantity_on_hand != null);
+    if (!trackedLots.length) {
+      lines.push({ componentId, label, type, totalAmount: totalNeeded, unitLabel, tracked: false, kind: 'consume' });
       return;
     }
-    const newQty = Math.max(0, entry.quantity_on_hand - totalAmount);
-    lines.push({
-      componentId,
-      rowId: entry.id,
-      label,
-      type,
-      totalAmount,
-      unitLabel,
-      tracked: true,
-      kind: 'consume',
-      currentQty: entry.quantity_on_hand,
-      newQty,
+    let remaining = totalNeeded;
+    trackedLots.forEach((entry) => {
+      if (remaining <= 0) return;
+      const take = Math.min(remaining, entry.quantity_on_hand);
+      if (take <= 0) return;
+      remaining -= take;
+      const newQty = Math.max(0, entry.quantity_on_hand - take);
+      lines.push({
+        componentId,
+        rowId: entry.id,
+        label,
+        type,
+        totalAmount: take,
+        unitLabel,
+        tracked: true,
+        kind: 'consume',
+        currentQty: entry.quantity_on_hand,
+        newQty,
+        lotCaliber: entry.caliber?.name ?? null,
+      });
     });
+    if (remaining > 0) {
+      lines.push({
+        componentId,
+        label,
+        type,
+        totalAmount: remaining,
+        unitLabel,
+        tracked: false,
+        kind: 'consume',
+        shortfall: true,
+      });
+    }
   };
 
-  const pushBrassCycleLine = (componentId, label) => {
+  const pushBrassCycleLines = (componentId, label) => {
     if (!componentId) return;
-    const entry = inventoryMap?.[componentId];
-    if (!entry) {
+    const lots = candidateInventoryLots(inventoryByComponent, componentId, caliberId, true);
+    if (!lots.length) {
       lines.push({ componentId, label, type: 'brass', totalAmount: rounds, unitLabel: 'firings', tracked: false, kind: 'cycles' });
       return;
     }
-    const currentCycles = entry.cycles_used ?? 0;
-    const newCycles = currentCycles + rounds;
-    lines.push({
-      componentId,
-      rowId: entry.id,
-      label,
-      type: 'brass',
-      totalAmount: rounds,
-      unitLabel: 'firings',
-      tracked: true,
-      kind: 'cycles',
-      currentCycles,
-      newCycles,
-      maxCycles: entry.reload_cycles ?? null,
-      nearingRetirement: entry.reload_cycles != null && newCycles >= entry.reload_cycles,
+    let remaining = rounds;
+    lots.forEach((entry) => {
+      if (remaining <= 0) return;
+      const currentCycles = entry.cycles_used ?? 0;
+      const capacity = entry.reload_cycles != null ? Math.max(0, entry.reload_cycles - currentCycles) : remaining;
+      const take = Math.min(remaining, capacity);
+      if (take <= 0) return; // this lot's already at/over its estimated max — move on to the next one
+      remaining -= take;
+      const newCycles = currentCycles + take;
+      lines.push({
+        componentId,
+        rowId: entry.id,
+        label,
+        type: 'brass',
+        totalAmount: take,
+        unitLabel: 'firings',
+        tracked: true,
+        kind: 'cycles',
+        currentCycles,
+        newCycles,
+        maxCycles: entry.reload_cycles ?? null,
+        nearingRetirement: entry.reload_cycles != null && newCycles >= entry.reload_cycles,
+        lotCaliber: entry.caliber?.name ?? null,
+      });
     });
+    if (remaining > 0) {
+      lines.push({
+        componentId,
+        label,
+        type: 'brass',
+        totalAmount: remaining,
+        unitLabel: 'firings',
+        tracked: false,
+        kind: 'cycles',
+        shortfall: true,
+      });
+    }
   };
 
-  pushConsumeLine(recipeComponents.powderId, recipeComponents.powderLabel, 'powder', recipeComponents.chargeGrains ?? 0, 'grains');
-  pushConsumeLine(recipeComponents.bulletId, recipeComponents.bulletLabel, 'bullet', 1, 'count');
-  pushConsumeLine(recipeComponents.primerId, recipeComponents.primerLabel, 'primer', 1, 'count');
-  pushBrassCycleLine(recipeComponents.brassId, recipeComponents.brassLabel);
+  pushConsumeLines(recipeComponents.powderId, recipeComponents.powderLabel, 'powder', recipeComponents.chargeGrains ?? 0, 'grains', false);
+  pushConsumeLines(recipeComponents.bulletId, recipeComponents.bulletLabel, 'bullet', 1, 'count', true);
+  pushConsumeLines(recipeComponents.primerId, recipeComponents.primerLabel, 'primer', 1, 'count', false);
+  pushBrassCycleLines(recipeComponents.brassId, recipeComponents.brassLabel);
 
   return lines;
 }
 
 /** Actually write the deduction — only the `tracked: true` lines from
- * computeBatchDeduction have anything to update. Best-effort per line
- * (one failed row doesn't roll back the others, since this always runs
- * after the load_batches row itself already saved successfully — losing a
- * stock update shouldn't make it look like the batch wasn't logged). */
+ * computeBatchDeduction have anything to update, each targeting its own
+ * specific lot by rowId. Best-effort per line (one failed row doesn't
+ * roll back the others, since this always runs after the load_batches row
+ * itself already saved successfully — losing a stock update shouldn't
+ * make it look like the batch wasn't logged). */
 export async function applyBatchDeduction(userId, lines) {
   const trackedLines = (lines || []).filter((l) => l.tracked);
   const results = await Promise.allSettled(

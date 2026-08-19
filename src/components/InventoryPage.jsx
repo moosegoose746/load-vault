@@ -10,6 +10,7 @@ import {
   isLowStock,
   updateInventoryEntry,
 } from '../lib/inventory.js';
+import { fetchCalibers } from '../lib/recipes.js';
 
 // Powder is bought by the pound but metered out by the grain (matching a
 // recipe's charge_weight_grains), so its section tracks Container Weight
@@ -64,13 +65,13 @@ function draftFromRow(row, isPowder) {
       quantityOnHand !== '' ? String(isPowder ? Number(quantityOnHand.toFixed(POWDER_DECIMALS)) : quantityOnHand) : '',
     reloadCycles: row.reload_cycles != null ? String(row.reload_cycles) : '',
     cyclesUsed: row.cycles_used != null ? String(row.cycles_used) : '0',
-    caliber: row.caliber || '',
+    caliberId: row.caliber_id || '',
     primerSize: row.primer_size || '',
   };
 }
 
 function emptyDraft() {
-  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '', cyclesUsed: '', caliber: '', primerSize: '' };
+  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '', cyclesUsed: '', caliberId: '', primerSize: '' };
 }
 
 function emptyNewRow() {
@@ -96,7 +97,7 @@ function parseDraft(draft, isPowder) {
     quantityOnHand,
     reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
     cyclesUsed: draft.cyclesUsed !== '' && draft.cyclesUsed != null ? Number.parseInt(draft.cyclesUsed, 10) : 0,
-    caliber: draft.caliber?.trim() || null,
+    caliberId: draft.caliberId || null,
     primerSize: draft.primerSize && draft.primerSize !== PRIMER_OTHER ? draft.primerSize.trim() || null : null,
   };
 }
@@ -116,6 +117,7 @@ function formatCostPerUnit(unitCost, packageQty, isPowder) {
 // supabase/schema_inventory.sql and src/lib/inventory.js.
 export default function InventoryPage({ authUser }) {
   const [components, setComponents] = useState([]);
+  const [calibers, setCalibers] = useState([]);
   const [rows, setRows] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
@@ -131,10 +133,11 @@ export default function InventoryPage({ authUser }) {
     }
     setLoading(true);
     setError('');
-    Promise.all([fetchAllComponents(), fetchUserInventoryRows(authUser.id)])
-      .then(([comps, invRows]) => {
+    Promise.all([fetchAllComponents(), fetchUserInventoryRows(authUser.id), fetchCalibers()])
+      .then(([comps, invRows, cals]) => {
         setComponents(comps);
         setRows(invRows);
+        setCalibers(cals);
         const nextDrafts = {};
         invRows.forEach((row) => {
           const isPowder = (row.component?.type ?? row.custom_type) === 'powder';
@@ -146,11 +149,6 @@ export default function InventoryPage({ authUser }) {
       .finally(() => setLoading(false));
   }, [authUser]);
 
-  const usedComponentIds = useMemo(
-    () => new Set(rows.filter((r) => r.component_id).map((r) => r.component_id)),
-    [rows]
-  );
-
   const rowsByType = useMemo(() => {
     const byType = { powder: [], bullet: [], primer: [], brass: [] };
     rows.forEach((row) => {
@@ -160,13 +158,18 @@ export default function InventoryPage({ authUser }) {
     return byType;
   }, [rows]);
 
-  const availableComponentsByType = useMemo(() => {
+  // Every catalog component of each type is always offered in the "add a
+  // row" dropdown, even ones you've already added — a component can have
+  // any number of inventory lots (different purchases, and for bullet/
+  // brass, different calibers of the same catalog item), so there's no
+  // reason to hide it after the first one.
+  const componentsByType = useMemo(() => {
     const byType = { powder: [], bullet: [], primer: [], brass: [] };
     components.forEach((c) => {
-      if (byType[c.type] && !usedComponentIds.has(c.id)) byType[c.type].push(c);
+      if (byType[c.type]) byType[c.type].push(c);
     });
     return byType;
-  }, [components, usedComponentIds]);
+  }, [components]);
 
   const updateDraft = (rowId, field, value) => {
     setDrafts((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [field]: value } }));
@@ -322,13 +325,18 @@ export default function InventoryPage({ authUser }) {
                           </td>
                           {hasCaliber && (
                             <td className="px-3 py-2 align-top">
-                              <input
-                                type="text"
-                                placeholder="e.g. 6.5 Creedmoor"
-                                value={draft.caliber}
-                                onChange={(e) => updateDraft(row.id, 'caliber', e.target.value)}
-                                className={`${inputClass} w-32`}
-                              />
+                              <select
+                                value={draft.caliberId}
+                                onChange={(e) => updateDraft(row.id, 'caliberId', e.target.value)}
+                                className={`${inputClass} w-36`}
+                              >
+                                <option value="">Select…</option>
+                                {calibers.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </select>
                             </td>
                           )}
                           {hasPrimerSize && (
@@ -483,7 +491,7 @@ export default function InventoryPage({ authUser }) {
                             className={inputClass}
                           >
                             <option value="">Select {label.toLowerCase()}…</option>
-                            {availableComponentsByType[type].map((c) => (
+                            {componentsByType[type].map((c) => (
                               <option key={c.id} value={c.id}>
                                 {c.brand} {c.model}
                               </option>
@@ -494,13 +502,18 @@ export default function InventoryPage({ authUser }) {
                       </td>
                       {hasCaliber && (
                         <td className="px-3 py-2 align-top">
-                          <input
-                            type="text"
-                            placeholder="e.g. 6.5 Creedmoor"
-                            value={newRow.caliber}
-                            onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], caliber: e.target.value } }))}
-                            className={`${inputClass} w-32`}
-                          />
+                          <select
+                            value={newRow.caliberId}
+                            onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], caliberId: e.target.value } }))}
+                            className={`${inputClass} w-36`}
+                          >
+                            <option value="">Select…</option>
+                            {calibers.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                       )}
                       {hasPrimerSize && (

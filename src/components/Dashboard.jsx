@@ -104,6 +104,9 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       primerLabel: recipe.primer,
       brassId: recipe.brassId,
       brassLabel: recipe.brass,
+      // Bullet/brass deduction is caliber-specific — see
+      // candidateInventoryLots in lib/inventory.js.
+      caliberId: recipe.caliberId,
     }),
     [recipe]
   );
@@ -280,31 +283,43 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
           {batchDeductionPreview.length > 0 && (
             <div className="mt-3 flex flex-col gap-1 border-t border-slate-800 pt-3">
-              {batchDeductionPreview.map((line) =>
+              {batchDeductionPreview.map((line, i) =>
                 line.kind === 'cycles' ? (
-                  <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
-                    <span className="text-slate-200">{line.label}</span> (brass): +{line.totalAmount} firings
+                  <p key={`${line.componentId}-${line.rowId ?? 'untracked'}-${i}`} className="font-mono text-[11px] text-slate-400">
+                    <span className="text-slate-200">
+                      {line.label}
+                      {line.lotCaliber ? ` (${line.lotCaliber})` : ''}
+                    </span>{' '}
+                    (brass): +{line.totalAmount} firings
                     {line.tracked ? (
                       <>
                         {' '}
                         ({line.currentCycles} → {line.newCycles}
                         {line.maxCycles != null ? ` of ~${line.maxCycles} est. cycles` : ''})
                         {line.nearingRetirement && (
-                          <span className="text-amber-400"> — nearing estimated max, consider inspecting/retiring this batch</span>
+                          <span className="text-amber-400"> — nearing estimated max, consider inspecting/retiring this lot</span>
                         )}
                       </>
+                    ) : line.shortfall ? (
+                      <span className="text-amber-400"> — no matching lot has room left, skipped</span>
                     ) : (
                       <span className="text-slate-600"> — not tracked in your inventory, skipped</span>
                     )}
                   </p>
                 ) : (
-                  <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
-                    <span className="text-slate-200">{line.label}</span>: −{line.totalAmount} {line.unitLabel}
+                  <p key={`${line.componentId}-${line.rowId ?? 'untracked'}-${i}`} className="font-mono text-[11px] text-slate-400">
+                    <span className="text-slate-200">
+                      {line.label}
+                      {line.lotCaliber ? ` (${line.lotCaliber})` : ''}
+                    </span>
+                    : −{line.totalAmount} {line.unitLabel}
                     {line.tracked ? (
                       <>
                         {' '}
                         ({line.currentQty} → {Number(line.newQty.toFixed(2))} {line.unitLabel})
                       </>
+                    ) : line.shortfall ? (
+                      <span className="text-amber-400"> — not enough on hand in any matching lot, skipped</span>
                     ) : (
                       <span className="text-slate-600"> — not tracked in your inventory, skipped</span>
                     )}

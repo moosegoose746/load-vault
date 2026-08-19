@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js';
-import { fetchUserInventoryMap } from './inventory.js';
+import { fetchUserInventoryMap, candidateInventoryLots } from './inventory.js';
 
 // Real Supabase-backed recipe data layer. Everything here maps Postgres
 // rows into the same flat "recipe view model" shape `src/data/mockRecipe.js`
@@ -40,17 +40,22 @@ export async function fetchUserRecipes(userId) {
 /** Cost of one unit of a component (one bullet, one primer, one case, or —
  * for powder — one grain), from the user's OWN saved inventory pricing —
  * never the shared `components.unit_cost` catalog field, which is just
- * generic placeholder data (see schema_inventory.sql). `inventory` is a
- * map of component_id -> user_inventory row, from fetchUserInventory().
- * Returns `null` (not 0) when the component is selected but the user
- * hasn't entered a price for it yet, so callers can tell "free/not
- * applicable" apart from "unknown cost" instead of silently
- * under-counting the total. `reloadCycles` divides the per-unit cost
- * further — only meaningful for brass (amortizing a case's cost across
- * multiple reloadings); everything else passes 1 (no-op). */
-function costForComponent(component, inventory, quantity = 1, reloadCycles = 1) {
+ * generic placeholder data (see schema_inventory.sql). `inventoryByComponent`
+ * is component_id -> array of lots, from fetchUserInventoryMap(). A
+ * component can now have multiple lots (see schema_inventory_v4.sql); this
+ * prices off whichever qualifying lot (caliber-matched first, same rule as
+ * deduction — see candidateInventoryLots) is oldest and actually has a
+ * price entered, mirroring the lot deduction would draw from first.
+ * Returns `null` (not 0) when the component is selected but no qualifying
+ * lot has a price yet, so callers can tell "free/not applicable" apart
+ * from "unknown cost" instead of silently under-counting the total.
+ * `reloadCycles` divides the per-unit cost further — only meaningful for
+ * brass (amortizing a case's cost across multiple reloadings); everything
+ * else passes 1 (no-op). */
+function costForComponent(component, inventoryByComponent, caliberId, caliberSpecific, quantity = 1, reloadCycles = 1) {
   if (!component) return 0; // nothing selected for this slot — not applicable
-  const entry = inventory?.[component.id];
+  const lots = candidateInventoryLots(inventoryByComponent, component.id, caliberId, caliberSpecific);
+  const entry = lots.find((l) => l.unit_cost != null && l.package_qty);
   if (!entry) return null;
   const cycles = reloadCycles && reloadCycles > 0 ? reloadCycles : 1;
   return ((entry.unit_cost / entry.package_qty) * quantity) / cycles;
@@ -61,16 +66,20 @@ function costForComponent(component, inventory, quantity = 1, reloadCycles = 1) 
  * charge weight (package_qty for powder is in grains), bullet/primer are
  * flat one-per-round costs, and brass is divided by however many reload
  * cycles the user estimated for it (defaulting to 1 / single-use if they
- * haven't set one) — matching the master doc's cost formula. Returns
- * `null` if ANY selected component has no saved price yet, rather than
- * silently showing a partial (understated) total. */
-function calculateCostPerRound(row, inventory) {
-  const brassEntry = row.brass ? inventory?.[row.brass.id] : null;
+ * haven't set one) — matching the master doc's cost formula. Bullet and
+ * brass pricing is caliber-matched against the recipe's own caliber_id
+ * (see costForComponent/candidateInventoryLots), same as deduction.
+ * Returns `null` if ANY selected component has no saved price yet, rather
+ * than silently showing a partial (understated) total. */
+function calculateCostPerRound(row, inventoryByComponent) {
+  const caliberId = row.caliber_id ?? null;
+  const brassLots = row.brass ? candidateInventoryLots(inventoryByComponent, row.brass.id, caliberId, true) : [];
+  const brassEntry = brassLots.find((l) => l.reload_cycles != null) ?? brassLots[0];
   const parts = [
-    costForComponent(row.powder, inventory, row.charge_weight_grains ?? 0),
-    costForComponent(row.bullet, inventory),
-    costForComponent(row.primer, inventory),
-    costForComponent(row.brass, inventory, 1, brassEntry?.reload_cycles),
+    costForComponent(row.powder, inventoryByComponent, caliberId, false, row.charge_weight_grains ?? 0),
+    costForComponent(row.bullet, inventoryByComponent, caliberId, true),
+    costForComponent(row.primer, inventoryByComponent, caliberId, false),
+    costForComponent(row.brass, inventoryByComponent, caliberId, true, 1, brassEntry?.reload_cycles),
   ];
   if (parts.some((p) => p == null)) return null;
   return parts.reduce((sum, p) => sum + p, 0);
@@ -91,18 +100,21 @@ function calculateCostPerRound(row, inventory) {
  * On Hand (case count) here, same as everything else — separate from
  * cycles_used/reload_cycles, which is about a batch of brass wearing out,
  * not how many cases exist. */
-function calculateLoadableFromStock(row, inventory) {
+function calculateLoadableFromStock(row, inventoryByComponent) {
+  const caliberId = row.caliber_id ?? null;
   const parts = [];
-  const add = (component, label, perRoundAmount) => {
+  const add = (component, label, perRoundAmount, caliberSpecific) => {
     if (!component || !(perRoundAmount > 0)) return;
-    const entry = inventory?.[component.id];
-    if (!entry || entry.quantity_on_hand == null) return;
-    parts.push({ label, rounds: Math.floor(entry.quantity_on_hand / perRoundAmount) });
+    const lots = candidateInventoryLots(inventoryByComponent, component.id, caliberId, caliberSpecific);
+    const trackedLots = lots.filter((l) => l.quantity_on_hand != null);
+    if (!trackedLots.length) return;
+    const totalOnHand = trackedLots.reduce((sum, l) => sum + l.quantity_on_hand, 0);
+    parts.push({ label, rounds: Math.floor(totalOnHand / perRoundAmount) });
   };
-  add(row.powder, `${row.powder?.brand} ${row.powder?.model}`, row.charge_weight_grains ?? 0);
-  add(row.bullet, `${row.bullet?.brand} ${row.bullet?.model}`, 1);
-  add(row.primer, `${row.primer?.brand} ${row.primer?.model}`, 1);
-  add(row.brass, `${row.brass?.brand} ${row.brass?.model}`, 1);
+  add(row.powder, `${row.powder?.brand} ${row.powder?.model}`, row.charge_weight_grains ?? 0, false);
+  add(row.bullet, `${row.bullet?.brand} ${row.bullet?.model}`, 1, true);
+  add(row.primer, `${row.primer?.brand} ${row.primer?.model}`, 1, false);
+  add(row.brass, `${row.brass?.brand} ${row.brass?.model}`, 1, true);
 
   if (!parts.length) return { loadableFromStock: null, loadableBottleneck: null };
   const min = parts.reduce((a, b) => (b.rounds < a.rounds ? b : a));
@@ -151,6 +163,11 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
     id: row.id,
     title: row.title,
     caliber: row.calibers?.name ?? '—',
+    // Raw caliber id — used (alongside powderId/bulletId/primerId/brassId
+    // below) to caliber-match bullet/brass inventory lots for both the
+    // Cost/Round math above and the Loading Session deduction preview in
+    // Dashboard (see candidateInventoryLots in lib/inventory.js).
+    caliberId: row.caliber_id ?? null,
     powder: componentLabel(row.powder),
     bullet: componentLabel(row.bullet),
     chargeGrains: row.charge_weight_grains,
@@ -202,7 +219,7 @@ export async function fetchRecipeDetail(recipeId, userId) {
     .from('load_recipes')
     .select(
       `
-      id, title, charge_weight_grains, coal_inches, rifle_model, notes,
+      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, notes,
       calibers ( name ),
       powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
       bullet:components!load_recipes_bullet_id_fkey ( id, brand, model ),
