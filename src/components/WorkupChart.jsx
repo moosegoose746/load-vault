@@ -134,13 +134,18 @@ export default function WorkupChart({ rungs }) {
   const vMin = Math.min(...allVelocities);
   const vMax = Math.max(...allVelocities);
   const vPad = Math.max((vMax - vMin) * 0.15, 15);
-  const yMin = vMin - vPad;
-  const yMax = vMax + vPad;
+  // "Nice" tick values can round OUTSIDE the padded vMin/vMax range (e.g. a
+  // ceiling of 2934 rounds up to a 3000 gridline) — if the y-domain used for
+  // toY() didn't also expand to cover that, the tick would plot above
+  // MARGIN.top and, thanks to overflow-visible, spill into whatever sits
+  // above the chart on the page. So: generate ticks first from the padded
+  // range, then grow the actual plotted domain to fully contain them.
+  const yTicks = niceTicks(vMin - vPad, vMax + vPad, 5);
+  const yMin = Math.min(vMin - vPad, yTicks[0]);
+  const yMax = Math.max(vMax + vPad, yTicks[yTicks.length - 1]);
 
   const toX = (c) => MARGIN.left + ((c - xMin) / (xMax - xMin)) * PLOT_W;
   const toY = (v) => MARGIN.top + PLOT_H - ((v - yMin) / (yMax - yMin)) * PLOT_H;
-
-  const yTicks = niceTicks(yMin, yMax, 5);
 
   const fit =
     usable.length >= 2 ? linearRegression(usable.map((r) => ({ x: r.chargeGrains, y: r.avgVelocity }))) : null;
@@ -300,6 +305,31 @@ export default function WorkupChart({ rungs }) {
             {active.stdDevFps != null && <span className="text-slate-400"> · SD {active.stdDevFps}</span>}
             {active.extremeSpread != null && <span className="text-slate-400"> · ES {active.extremeSpread}</span>}
           </div>
+          {fit && usable.length >= 3 && (() => {
+            const predicted = fit.slope * active.chargeGrains + fit.intercept;
+            const delta = active.avgVelocity - predicted;
+            const rounded = Math.round(delta);
+            // Deliberately neutral color, not red/green — a rung sitting
+            // BELOW the trend is often the desirable flat/node reloaders are
+            // hunting for, so "deviates from trend" isn't inherently bad.
+            // This just names the number the chart already implies, it
+            // doesn't editorialize on it.
+            return (
+              <div className="text-slate-400">
+                {Math.abs(rounded) < 1 ? (
+                  <span>on trend</span>
+                ) : (
+                  <span>
+                    <span className="font-mono text-slate-200">
+                      {rounded > 0 ? '+' : ''}
+                      {rounded} fps
+                    </span>{' '}
+                    {rounded > 0 ? 'above' : 'below'} trend
+                  </span>
+                )}
+              </div>
+            );
+          })()}
           {(active.groupSizeMoa != null || active.roundsFired != null) && (
             <div className="text-slate-400">
               {active.groupSizeMoa != null && <span>{active.groupSizeMoa.toFixed(2)} MOA</span>}
