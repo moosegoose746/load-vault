@@ -20,11 +20,26 @@ import {
 // count for everything else); only the powder section's inputs convert
 // to/from lbs for display, right here.
 const SECTIONS = [
-  { type: 'powder', label: 'Powder', isPowder: true },
-  { type: 'bullet', label: 'Bullet', isPowder: false },
-  { type: 'primer', label: 'Primer', isPowder: false },
-  { type: 'brass', label: 'Brass', isPowder: false },
+  { type: 'powder', label: 'Powder', isPowder: true, hasCaliber: false, hasPrimerSize: false },
+  { type: 'bullet', label: 'Bullet', isPowder: false, hasCaliber: true, hasPrimerSize: false },
+  { type: 'primer', label: 'Primer', isPowder: false, hasCaliber: false, hasPrimerSize: true },
+  { type: 'brass', label: 'Brass', isPowder: false, hasCaliber: true, hasPrimerSize: false },
 ];
+
+// Standard SAAMI primer sizes — a plain dropdown covers the vast majority
+// of cases; "Other" reveals a text input for anything unusual.
+const PRIMER_SIZES = [
+  'Small Pistol',
+  'Small Pistol Magnum',
+  'Large Pistol',
+  'Large Pistol Magnum',
+  'Small Rifle',
+  'Small Rifle Magnum',
+  'Large Rifle',
+  'Large Rifle Magnum',
+  '209 Shotshell',
+];
+const PRIMER_OTHER = '__other__';
 
 const CUSTOM_VALUE = '__custom__';
 
@@ -49,11 +64,13 @@ function draftFromRow(row, isPowder) {
       quantityOnHand !== '' ? String(isPowder ? Number(quantityOnHand.toFixed(POWDER_DECIMALS)) : quantityOnHand) : '',
     reloadCycles: row.reload_cycles != null ? String(row.reload_cycles) : '',
     cyclesUsed: row.cycles_used != null ? String(row.cycles_used) : '0',
+    caliber: row.caliber || '',
+    primerSize: row.primer_size || '',
   };
 }
 
 function emptyDraft() {
-  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '', cyclesUsed: '' };
+  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '', cyclesUsed: '', caliber: '', primerSize: '' };
 }
 
 function emptyNewRow() {
@@ -79,6 +96,8 @@ function parseDraft(draft, isPowder) {
     quantityOnHand,
     reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
     cyclesUsed: draft.cyclesUsed !== '' && draft.cyclesUsed != null ? Number.parseInt(draft.cyclesUsed, 10) : 0,
+    caliber: draft.caliber?.trim() || null,
+    primerSize: draft.primerSize && draft.primerSize !== PRIMER_OTHER ? draft.primerSize.trim() || null : null,
   };
 }
 
@@ -249,10 +268,11 @@ export default function InventoryPage({ authUser }) {
 
       {!loading &&
         !error &&
-        SECTIONS.map(({ type, label, isPowder }) => {
+        SECTIONS.map(({ type, label, isPowder, hasCaliber, hasPrimerSize }) => {
           const sectionRows = rowsByType[type];
           const newRow = newRows[type];
           const status = addStatus[type];
+          const colCount = 5 + (hasCaliber ? 1 : 0) + (hasPrimerSize ? 1 : 0) + (type === 'brass' ? 2 : 0);
           return (
             <div key={type} className="mb-8">
               <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">{label}</h2>
@@ -261,6 +281,8 @@ export default function InventoryPage({ authUser }) {
                   <thead>
                     <tr className="border-b border-slate-800 bg-panel text-left text-[10px] uppercase tracking-widest text-slate-500">
                       <th className="px-3 py-2">Component</th>
+                      {hasCaliber && <th className="px-3 py-2">Caliber</th>}
+                      {hasPrimerSize && <th className="px-3 py-2">Primer Size</th>}
                       <th className="px-3 py-2">Purchase Price ($)</th>
                       <th className="px-3 py-2">{isPowder ? 'Container Weight (lbs)' : 'Qty per Package'}</th>
                       <th className="px-3 py-2">{isPowder ? 'Cost/Grain' : 'Cost/Unit'}</th>
@@ -277,7 +299,7 @@ export default function InventoryPage({ authUser }) {
                   <tbody>
                     {sectionRows.length === 0 && (
                       <tr>
-                        <td colSpan={type === 'brass' ? 7 : 5} className="px-3 py-3 text-center text-xs text-slate-600">
+                        <td colSpan={colCount} className="px-3 py-3 text-center text-xs text-slate-600">
                           No {label.toLowerCase()} tracked yet.
                         </td>
                       </tr>
@@ -298,6 +320,43 @@ export default function InventoryPage({ authUser }) {
                               </span>
                             )}
                           </td>
+                          {hasCaliber && (
+                            <td className="px-3 py-2 align-top">
+                              <input
+                                type="text"
+                                placeholder="e.g. 6.5 Creedmoor"
+                                value={draft.caliber}
+                                onChange={(e) => updateDraft(row.id, 'caliber', e.target.value)}
+                                className={`${inputClass} w-32`}
+                              />
+                            </td>
+                          )}
+                          {hasPrimerSize && (
+                            <td className="px-3 py-2 align-top">
+                              <select
+                                value={PRIMER_SIZES.includes(draft.primerSize) ? draft.primerSize : draft.primerSize ? PRIMER_OTHER : ''}
+                                onChange={(e) => updateDraft(row.id, 'primerSize', e.target.value === PRIMER_OTHER ? PRIMER_OTHER : e.target.value)}
+                                className={`${inputClass} w-36`}
+                              >
+                                <option value="">Select…</option>
+                                {PRIMER_SIZES.map((size) => (
+                                  <option key={size} value={size}>
+                                    {size}
+                                  </option>
+                                ))}
+                                <option value={PRIMER_OTHER}>Other…</option>
+                              </select>
+                              {draft.primerSize && !PRIMER_SIZES.includes(draft.primerSize) && (
+                                <input
+                                  type="text"
+                                  placeholder="Custom primer size"
+                                  value={draft.primerSize === PRIMER_OTHER ? '' : draft.primerSize}
+                                  onChange={(e) => updateDraft(row.id, 'primerSize', e.target.value)}
+                                  className={`${inputClass} mt-1 w-36`}
+                                />
+                              )}
+                            </td>
+                          )}
                           <td className="px-3 py-2 align-top">
                             <input
                               type="number"
@@ -433,6 +492,52 @@ export default function InventoryPage({ authUser }) {
                           </select>
                         )}
                       </td>
+                      {hasCaliber && (
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="text"
+                            placeholder="e.g. 6.5 Creedmoor"
+                            value={newRow.caliber}
+                            onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], caliber: e.target.value } }))}
+                            className={`${inputClass} w-32`}
+                          />
+                        </td>
+                      )}
+                      {hasPrimerSize && (
+                        <td className="px-3 py-2 align-top">
+                          <select
+                            value={
+                              PRIMER_SIZES.includes(newRow.primerSize) ? newRow.primerSize : newRow.primerSize ? PRIMER_OTHER : ''
+                            }
+                            onChange={(e) =>
+                              setNewRows((prev) => ({
+                                ...prev,
+                                [type]: { ...prev[type], primerSize: e.target.value === PRIMER_OTHER ? PRIMER_OTHER : e.target.value },
+                              }))
+                            }
+                            className={`${inputClass} w-36`}
+                          >
+                            <option value="">Select…</option>
+                            {PRIMER_SIZES.map((size) => (
+                              <option key={size} value={size}>
+                                {size}
+                              </option>
+                            ))}
+                            <option value={PRIMER_OTHER}>Other…</option>
+                          </select>
+                          {newRow.primerSize && !PRIMER_SIZES.includes(newRow.primerSize) && (
+                            <input
+                              type="text"
+                              placeholder="Custom primer size"
+                              value={newRow.primerSize === PRIMER_OTHER ? '' : newRow.primerSize}
+                              onChange={(e) =>
+                                setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], primerSize: e.target.value } }))
+                              }
+                              className={`${inputClass} mt-1 w-36`}
+                            />
+                          )}
+                        </td>
+                      )}
                       <td className="px-3 py-2 align-top">
                         <input
                           type="number"

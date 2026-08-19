@@ -68,6 +68,8 @@ export async function addInventoryEntry(userId, fields) {
       package_qty: fields.packageQty,
       quantity_on_hand: fields.quantityOnHand ?? null,
       reload_cycles: fields.reloadCycles ?? null,
+      caliber: fields.caliber || null,
+      primer_size: fields.primerSize || null,
       notes: fields.notes || null,
     })
     .select('*, component:components ( id, type, brand, model )')
@@ -77,9 +79,11 @@ export async function addInventoryEntry(userId, fields) {
 }
 
 /** Update an existing row's editable fields (price/qty/reload cycles/
- * cycles used) by its own id — component/custom identity isn't editable
- * once created; delete and re-add instead. `cyclesUsed` is only
- * meaningful for brass but harmless to send as null for other types. */
+ * cycles used/caliber/primer size) by its own id — component/custom
+ * identity isn't editable once created; delete and re-add instead.
+ * `cyclesUsed` is only meaningful for brass, `caliber` for bullet/brass,
+ * `primerSize` for primer, but harmless to send as null for other
+ * types. */
 export async function updateInventoryEntry(rowId, fields) {
   const { data, error } = await supabase
     .from('user_inventory')
@@ -89,6 +93,8 @@ export async function updateInventoryEntry(rowId, fields) {
       quantity_on_hand: fields.quantityOnHand ?? null,
       reload_cycles: fields.reloadCycles ?? null,
       cycles_used: fields.cyclesUsed ?? 0,
+      caliber: fields.caliber || null,
+      primer_size: fields.primerSize || null,
       notes: fields.notes || null,
       updated_at: new Date().toISOString(),
     })
