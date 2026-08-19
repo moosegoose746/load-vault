@@ -10,6 +10,7 @@ import { useSync } from '../context/SyncContext.jsx';
 import { createLoadBatch, createRangeSession } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
 import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
+import { fetchUserFirearms } from '../lib/firearms.js';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
@@ -33,6 +34,16 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   // sighters/warm-ups that never got a velocity reading.
   const [roundsFired, setRoundsFired] = useState('');
   const [roundsFiredEdited, setRoundsFiredEdited] = useState(false);
+
+  // Which firearm this range session's rounds were fired through —
+  // optional, drives that firearm's tracked round count/barrel life (see
+  // lib/firearms.js). Defaults to whatever firearm was picked last time
+  // for this recipe (recipe.defaultFirearmId), but never overwrites it
+  // once the user's actually touched the dropdown themselves — same
+  // pattern as Rounds Fired above.
+  const [firearms, setFirearms] = useState([]);
+  const [firearmId, setFirearmId] = useState('');
+  const [firearmIdEdited, setFirearmIdEdited] = useState(false);
 
   // Loading Session state — logging a batch actually assembles ammo and
   // is what triggers component deduction (see computeBatchDeduction/
@@ -75,6 +86,27 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       .catch((err) => console.error('Failed to load inventory for deduction preview', err));
   }, [isRealRecipe, authUser, activeRecipeId]);
 
+  // Fetch this user's firearm profiles for the picker below — not scoped
+  // to the recipe's caliber via a query (firearms.js has no such filter),
+  // filtered client-side instead in firearmsForRecipe below.
+  useEffect(() => {
+    if (!isRealRecipe || !authUser) {
+      setFirearms([]);
+      return;
+    }
+    fetchUserFirearms(authUser.id)
+      .then(setFirearms)
+      .catch((err) => console.error('Failed to load firearms for range session', err));
+  }, [isRealRecipe, authUser, activeRecipeId]);
+
+  // Only offer firearms that actually match this recipe's caliber —
+  // same reasoning as caliber-matched inventory lots: a .223 rifle isn't
+  // a meaningful choice for a .308 recipe.
+  const firearmsForRecipe = useMemo(
+    () => firearms.filter((f) => f.caliber_id === recipe.caliberId),
+    [firearms, recipe.caliberId]
+  );
+
   // Default Rounds Fired to however many shots are showing (chrono'd or
   // manually typed) — a reasonable starting guess — but never overwrite it
   // once the user has actually touched the field themselves, and reset
@@ -85,6 +117,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     setRoundsLoaded('');
     setBatchNotes('');
     setBatchStatus('idle');
+    setFirearmIdEdited(false);
   }, [activeRecipeId]);
 
   useEffect(() => {
@@ -92,6 +125,12 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       setRoundsFired(displayShots?.length ? String(displayShots.length) : '');
     }
   }, [displayShots?.length, roundsFiredEdited]);
+
+  useEffect(() => {
+    if (!firearmIdEdited) {
+      setFirearmId(recipe.defaultFirearmId || '');
+    }
+  }, [recipe.defaultFirearmId, firearmIdEdited]);
 
   const recipeComponents = useMemo(
     () => ({
@@ -180,6 +219,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           shots: chronoShots ?? [],
           imageBlob: target.imageBlob,
           roundsFired: Number.isFinite(roundsFiredNum) && roundsFiredNum >= 0 ? roundsFiredNum : null,
+          firearmId: firearmId || null,
         });
 
         setSaveState('saved');
@@ -370,9 +410,33 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
               className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
             />
           </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase text-slate-500">Firearm (optional)</span>
+            <select
+              value={firearmId}
+              onChange={(e) => {
+                setFirearmId(e.target.value);
+                setFirearmIdEdited(true);
+              }}
+              className="w-48 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+            >
+              <option value="">Not tracked</option>
+              {firearmsForRecipe.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            {firearmsForRecipe.length === 0 && (
+              <span className="font-mono text-[10px] text-slate-600">
+                No firearms saved for this caliber yet — add one on the Firearms page.
+              </span>
+            )}
+          </label>
           <p className="max-w-md text-xs text-slate-400">
             Draws down Rounds On Hand — doesn't touch your component stock, since those were
-            already used when you logged the loading session above.
+            already used when you logged the loading session above. Picking a firearm also adds
+            these rounds to its tracked round count/barrel life.
           </p>
           {exceedsOnHand && (
             <p className="flex items-center gap-1 font-mono text-[11px] text-amber-400">

@@ -7,6 +7,7 @@ import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import RecipeForm from './components/RecipeForm.jsx';
 import InventoryPage from './components/InventoryPage.jsx';
+import FirearmsPage from './components/FirearmsPage.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import { archiveRecipe, fetchRecipeDetail, fetchUserRecipes } from './lib/recipes.js';
 
@@ -87,7 +88,7 @@ function AppShell() {
   const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
   const loading = DEV_SKIP_AUTH ? false : auth.loading;
 
-  const [view, setView] = useState('vault'); // 'vault' | 'inventory'
+  const [view, setView] = useState('vault'); // 'vault' | 'inventory' | 'firearms'
   const [userRecipes, setUserRecipes] = useState([]);
   const [activeRecipeId, setActiveRecipeId] = useState(null); // null = demo recipe
   const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
@@ -181,6 +182,8 @@ function AppShell() {
       {user ? (
         view === 'inventory' ? (
           <InventoryPage authUser={auth.user} />
+        ) : view === 'firearms' ? (
+          <FirearmsPage authUser={auth.user} />
         ) : (
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar

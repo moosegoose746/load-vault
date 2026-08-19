@@ -17,3 +17,21 @@ export async function compressTargetImage(file) {
     return file; // fall back to the original file rather than blocking the user
   }
 }
+
+// Firearm profile photos are a small avatar-style image, not something
+// anyone needs to zoom into for detail (unlike target photos, which get
+// measured against) — a smaller cap keeps storage/egress down further.
+export async function compressFirearmPhoto(file) {
+  const options = {
+    maxSizeMB: 0.25,
+    maxWidthOrHeight: 1000,
+    useWebWorker: true,
+    fileType: 'image/webp',
+  };
+  try {
+    return await imageCompression(file, options);
+  } catch (error) {
+    console.error('Image compression error:', error);
+    return file;
+  }
+}

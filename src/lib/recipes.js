@@ -248,6 +248,12 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
     // no recipeId yet) renders the same as `null` (nothing logged) in the
     // UI, both show as "—".
     roundsOnHand: roundsOnHand ?? null,
+    // Which firearm the most recent range session for this recipe used,
+    // if any — used purely as a default pre-fill for the firearm picker
+    // on the NEXT range session (see Dashboard.jsx), not a hard link.
+    // Firearm is a per-session choice (see schema_firearms.sql for why),
+    // this is just "what did I pick last time for this recipe."
+    defaultFirearmId: session?.firearm_id ?? null,
     shots: shots ?? [],
   };
 }
@@ -365,7 +371,11 @@ async function uploadTargetImage(blob, userId) {
  * shot today, separate from how many got a chrono reading — is persisted
  * so it can draw down `roundsOnHand` (see fetchRoundsOnHand above); unlike
  * the old behavior, saving a range session no longer deducts raw
- * component stock on its own (see supabase/schema_batches.sql). */
+ * component stock on its own (see supabase/schema_batches.sql).
+ * `firearmId` — which firearm profile this session's rounds were fired
+ * through, optional — is what actually drives a firearm's tracked round
+ * count/barrel life (see lib/firearms.js); it's a per-session choice, not
+ * inherited from the recipe. */
 export async function createRangeSession({
   recipeId,
   userId,
@@ -378,6 +388,7 @@ export async function createRangeSession({
   shots,
   imageBlob,
   roundsFired,
+  firearmId,
 }) {
   let targetImageUrl = null;
   if (imageBlob) {
@@ -403,6 +414,7 @@ export async function createRangeSession({
       extreme_spread_fps: extremeSpread,
       target_image_url: targetImageUrl,
       rounds_fired: roundsFired ?? null,
+      firearm_id: firearmId || null,
     })
     .select()
     .single();

@@ -1,19 +1,27 @@
 import { useState } from 'react';
-import { Boxes, Crosshair, LogOut, Menu, Sun, X } from 'lucide-react';
+import { Boxes, Crosshair, Layers, LogOut, Menu, Sun, X } from 'lucide-react';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
 import { useSync } from '../context/SyncContext.jsx';
 
 // Section 3: "Hero Header / Navigation Bar — Amber/gold logo, Sync Status
 // Badge, Range Mode Toggle, and Mobile Navigation." Also carries the
-// Vault/Inventory view switcher — the app has no router, so this is a
-// simple local view-state toggle rather than real page navigation.
+// Vault/Inventory/Firearms view switcher — the app has no router, so
+// this is a simple local view-state toggle rather than real page
+// navigation. Renders one button per view OTHER than the current one
+// (so it scales past two views without becoming a single confusing
+// toggle button).
+const VIEWS = [
+  { key: 'vault', label: 'VAULT', icon: Crosshair },
+  { key: 'inventory', label: 'INVENTORY', icon: Boxes },
+  { key: 'firearms', label: 'FIREARMS', icon: Layers },
+];
+
 export default function Header({ user, onSignOut, view = 'vault', onChangeView }) {
   const { rangeMode, toggleRangeMode } = useRangeMode();
   const { status: syncStatus } = useSync();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const otherView = view === 'vault' ? 'inventory' : 'vault';
-  const otherViewLabel = view === 'vault' ? 'INVENTORY' : 'VAULT';
+  const otherViews = VIEWS.filter((v) => v.key !== view);
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-800 bg-canvas/95 backdrop-blur">
@@ -28,15 +36,17 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView }
         {/* Desktop controls */}
         <div className="hidden items-center gap-3 sm:flex">
           <SyncStatusBadge status={syncStatus} />
-          {onChangeView && (
-            <button
-              onClick={() => onChangeView(otherView)}
-              className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
-            >
-              <Boxes size={14} />
-              {otherViewLabel}
-            </button>
-          )}
+          {onChangeView &&
+            otherViews.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => onChangeView(key)}
+                className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
           <button
             onClick={toggleRangeMode}
             aria-pressed={rangeMode}
@@ -73,18 +83,20 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView }
       {mobileOpen && (
         <div className="flex flex-col gap-3 border-t border-slate-800 px-4 py-3 sm:hidden">
           <SyncStatusBadge status={syncStatus} />
-          {onChangeView && (
-            <button
-              onClick={() => {
-                onChangeView(otherView);
-                setMobileOpen(false);
-              }}
-              className="flex items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-2 font-mono text-xs text-slate-300"
-            >
-              <Boxes size={14} />
-              {otherViewLabel}
-            </button>
-          )}
+          {onChangeView &&
+            otherViews.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  onChangeView(key);
+                  setMobileOpen(false);
+                }}
+                className="flex items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-2 font-mono text-xs text-slate-300"
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
           <button
             onClick={toggleRangeMode}
             aria-pressed={rangeMode}
