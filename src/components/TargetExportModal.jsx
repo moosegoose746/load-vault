@@ -178,30 +178,37 @@ export default function TargetExportModal({
     // `loadMaxWidth` (measured against the actual QR position, with a
     // safety margin) so nothing can ever run into/under the QR code or
     // off the edge of the card, no matter how long a component name is.
-    const loadX = 300;
+    const loadX = 320;
     const loadMaxWidth = qrX - 40 - loadX;
     if (loadMaxWidth > 80) {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#f1f5f9';
-      ctx.font = 'bold 24px monospace';
-      ctx.fillText(truncateText(ctx, recipe.title, loadMaxWidth), loadX, footerTop + 34);
+      ctx.font = 'bold 22px monospace';
+      ctx.fillText(truncateText(ctx, recipe.title, loadMaxWidth), loadX, footerTop + 30);
 
       ctx.fillStyle = '#fbbf24';
-      ctx.font = '22px monospace';
-      ctx.fillText(truncateText(ctx, recipe.caliber, loadMaxWidth), loadX, footerTop + 58);
-
-      ctx.fillStyle = '#94a3b8';
       ctx.font = '20px monospace';
-      const chargeLine = `${recipe.chargeGrains ?? '—'}gr ${recipe.powder} / ${recipe.bullet}`;
-      ctx.fillText(truncateText(ctx, chargeLine, loadMaxWidth), loadX, footerTop + 80);
+      ctx.fillText(truncateText(ctx, recipe.caliber, loadMaxWidth), loadX, footerTop + 52);
 
-      const primerBrassLine = [recipe.primer, recipe.brass].filter(Boolean).join(' · ');
-      if (primerBrassLine) {
-        ctx.fillText(truncateText(ctx, primerBrassLine, loadMaxWidth), loadX, footerTop + 102);
-      }
+      // Labeled component lines, not just bare values — "Hodgon H4350" on
+      // its own doesn't say whether that's the powder or the bullet.
+      // Powder/Bullet on their own lines (charge weight folded into the
+      // Powder line, since it's meaningless without knowing which powder
+      // it's a charge OF); Primer/Brass share a line since both tend to
+      // be short.
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '18px monospace';
+      const powderLine = `Powder: ${recipe.chargeGrains ?? '—'}gr ${recipe.powder || '—'}`;
+      ctx.fillText(truncateText(ctx, powderLine, loadMaxWidth), loadX, footerTop + 74);
+
+      const bulletLine = `Bullet: ${recipe.bullet || '—'}`;
+      ctx.fillText(truncateText(ctx, bulletLine, loadMaxWidth), loadX, footerTop + 96);
+
+      const primerBrassLine = `Primer: ${recipe.primer || '—'}  Brass: ${recipe.brass || '—'}`;
+      ctx.fillText(truncateText(ctx, primerBrassLine, loadMaxWidth), loadX, footerTop + 118);
 
       if (recipe.coalInches) {
-        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 124);
+        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 140);
       }
     }
     if (qrImgRef.current) {
