@@ -8,6 +8,7 @@ import {
   fetchComponentsByType,
 } from '../lib/recipes.js';
 import { fetchUserFirearms } from '../lib/firearms.js';
+import { fetchMatchingWorkup } from '../lib/workups.js';
 
 function Field({ label, children }) {
   return (
@@ -56,6 +57,12 @@ function formFromRecipe(recipe) {
 }
 
 const CORE_FIELDS = ['caliberId', 'powderId', 'bulletId', 'primerId', 'brassId', 'chargeGrains'];
+// Load Workups match a recipe by its FIVE fixed components only — charge
+// weight deliberately isn't part of that (a Workup's whole point is
+// testing several charge weights under one otherwise-identical recipe),
+// so this is CORE_FIELDS minus chargeGrains. See fetchMatchingWorkup in
+// lib/workups.js for the exact-match rule this mirrors.
+const WORKUP_MATCH_FIELDS = ['caliberId', 'powderId', 'bulletId', 'primerId', 'brassId'];
 
 // Creates OR edits a real `load_recipes` row in Supabase, depending on
 // whether `editingRecipe` is passed. Requires a genuine authenticated
@@ -90,6 +97,13 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
   // at all — only fetched in edit mode, only matters if the user actually
   // changes a core field (see coreFieldsChanged below).
   const [hasHistory, setHasHistory] = useState(false);
+  // The Load Workup (if any) this recipe's ORIGINAL components currently
+  // match exactly — see fetchMatchingWorkup in lib/workups.js and the
+  // "Part of a Load Workup" card on Dashboard.jsx's Overview tab, which
+  // is what this same match powers. Only fetched in edit mode; used to
+  // warn if a component edit would break that link (see
+  // workupLinkWouldBreak below).
+  const [linkedWorkup, setLinkedWorkup] = useState(null);
   const [showHistoryWarning, setShowHistoryWarning] = useState(false);
 
   useEffect(() => {
@@ -142,10 +156,24 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
           console.error('Failed to check recipe history', err);
           setHasHistory(false);
         });
+      const workupLookup = authUser
+        ? fetchMatchingWorkup(authUser.id, {
+            caliberId: editingRecipe.caliberId,
+            powderId: editingRecipe.powderId,
+            bulletId: editingRecipe.bulletId,
+            primerId: editingRecipe.primerId,
+            brassId: editingRecipe.brassId,
+          })
+        : Promise.resolve(null);
+      workupLookup.then(setLinkedWorkup).catch((err) => {
+        console.error('Failed to check for a matching Workup', err);
+        setLinkedWorkup(null);
+      });
     } else {
       setForm(emptyForm());
       setInitialCore(null);
       setHasHistory(false);
+      setLinkedWorkup(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingRecipe?.id]);
@@ -180,6 +208,19 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
   // has no history to protect.
   const coreFieldsChanged =
     isEditing && initialCore != null && CORE_FIELDS.some((key) => form[key] !== initialCore[key]);
+
+  // Would this edit break the recipe's link to `linkedWorkup`? Only the
+  // five WORKUP_MATCH_FIELDS matter here (not charge weight) — see the
+  // constant's own comment. A recipe whose components no longer match
+  // exactly stops showing up on that Workup's "part of" card the next
+  // time it's checked (see Dashboard.jsx), and — if the new components
+  // happen to exactly match some OTHER existing Workup — could silently
+  // start showing up there instead, which is worth calling out too.
+  const workupLinkWouldBreak =
+    isEditing &&
+    linkedWorkup != null &&
+    initialCore != null &&
+    WORKUP_MATCH_FIELDS.some((key) => form[key] !== initialCore[key]);
 
   const buildFields = () => ({
     title: form.title,
@@ -224,10 +265,10 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
       setError('Title, caliber, and charge weight are required.');
       return;
     }
-    // Only interrupt with the warning once, and only when it actually
-    // applies — a change to core components/charge on a recipe that
-    // already has Loading/Range Session history logged against it.
-    if (isEditing && hasHistory && coreFieldsChanged && !showHistoryWarning) {
+    // Only interrupt with the warning once, and only when at least one of
+    // its two reasons actually applies: cost/history retroactively
+    // changing, or breaking the recipe's Load Workup link.
+    if (isEditing && (hasHistory && coreFieldsChanged || workupLinkWouldBreak) && !showHistoryWarning) {
       setShowHistoryWarning(true);
       return;
     }
@@ -386,13 +427,25 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
 
             {showHistoryWarning ? (
               <div className="flex flex-col gap-2 rounded border border-amber-600 bg-amber-500/10 p-3">
-                <p className="flex items-start gap-2 font-mono text-xs leading-relaxed text-amber-200">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
-                  This recipe already has Loading Sessions and/or Range Sessions logged. Cost per round
-                  and Money Saved are always computed from the recipe's CURRENT components — changing
-                  them here will change those figures for the recipe's ENTIRE past history too, not just
-                  going forward.
-                </p>
+                {hasHistory && coreFieldsChanged && (
+                  <p className="flex items-start gap-2 font-mono text-xs leading-relaxed text-amber-200">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+                    This recipe already has Loading Sessions and/or Range Sessions logged. Cost per round
+                    and Money Saved are always computed from the recipe's CURRENT components — changing
+                    them here will change those figures for the recipe's ENTIRE past history too, not
+                    just going forward.
+                  </p>
+                )}
+                {workupLinkWouldBreak && (
+                  <p className="flex items-start gap-2 font-mono text-xs leading-relaxed text-amber-200">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+                    This recipe is currently recognized as part of the Load Workup{' '}
+                    <span className="font-semibold">"{linkedWorkup?.title}"</span> (its components match that
+                    Workup exactly). This change will break that link — it'll stop showing up on that
+                    Workup's card, and could start matching a different Workup instead if the new
+                    components happen to line up with one.
+                  </p>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="submit"
