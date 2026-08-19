@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Camera, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Camera, Plus, Target, Trash2, X } from 'lucide-react';
 import {
   barrelLifePercentUsed,
   createFirearm,
   deleteFirearm,
+  fetchFirearmStats,
   fetchRoundsFiredByFirearm,
   fetchUserFirearms,
   isNearingBarrelLife,
@@ -261,7 +262,149 @@ function FirearmFormModal({ open, firearm, calibers, authUser, onClose, onSaved 
   );
 }
 
-function FirearmCard({ firearm, roundsFiredByFirearm, onEdit, onDelete }) {
+// Read-only detail view, opened by clicking a card — bigger photo plus
+// the "fun stats" from fetchFirearmStats (best group, sessions logged,
+// which recipes have been fired through it). Fetched lazily on open
+// rather than up front for every card on the page, since it's a couple
+// of extra queries per firearm that most visits to this page won't need.
+function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEdit }) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open || !firearm) return;
+    setStats(null);
+    setLoading(true);
+    setError('');
+    fetchFirearmStats(firearm.id)
+      .then(setStats)
+      .catch((err) => setError(err.message || 'Failed to load stats.'))
+      .finally(() => setLoading(false));
+  }, [open, firearm]);
+
+  if (!open || !firearm) return null;
+
+  const totalRounds = totalRoundsForFirearm(firearm, roundsFiredByFirearm);
+  const percentUsed = barrelLifePercentUsed(firearm, totalRounds);
+  const nearing = isNearingBarrelLife(firearm, totalRounds);
+  const detailLine = [firearm.make, firearm.model].filter(Boolean).join(' ');
+  const barrelLine = [
+    firearm.barrel_length_inches ? `${firearm.barrel_length_inches}" barrel` : null,
+    firearm.twist_rate ? `${firearm.twist_rate} twist` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded border border-amber-500 bg-panel p-5 shadow-[0_0_24px_rgba(245,158,11,0.25)]">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-mono text-lg font-bold text-amber-400">{firearm.name}</h2>
+            <p className="text-xs text-slate-400">{firearm.caliber?.name}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-100" aria-label="Close">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex h-56 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-900">
+          {firearm.photo_url ? (
+            <img src={firearm.photo_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <Camera size={40} className="text-slate-600" />
+          )}
+        </div>
+
+        {(detailLine || firearm.optic || barrelLine) && (
+          <div className="flex flex-col gap-0.5 text-xs text-slate-400">
+            {detailLine && <p>{detailLine}</p>}
+            {firearm.optic && <p>{firearm.optic}</p>}
+            {barrelLine && <p>{barrelLine}</p>}
+          </div>
+        )}
+
+        <div className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Rounds Fired</span>
+            <span className="font-mono text-sm text-slate-100">{totalRounds}</span>
+          </div>
+          {percentUsed != null && (
+            <div className="mt-2">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className={`h-full rounded-full ${nearing ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${percentUsed}%` }}
+                />
+              </div>
+              <p className="mt-1 font-mono text-[10px] text-slate-500">
+                {percentUsed}% of ~{firearm.estimated_barrel_life} est. barrel life
+              </p>
+              {nearing && (
+                <p className="mt-1 flex items-center gap-1 font-mono text-[10px] text-amber-400">
+                  <AlertTriangle size={10} />
+                  Nearing estimated barrel life — keep an eye on accuracy/throat erosion
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {loading && <p className="font-mono text-xs text-slate-400">Loading stats…</p>}
+        {error && <p className="font-mono text-xs text-red-400">{error}</p>}
+
+        {stats && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Range Sessions</span>
+              <p className="mt-1 font-mono text-lg text-slate-100">{stats.sessionCount}</p>
+            </div>
+            <div className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Best Group</span>
+              <p className="mt-1 flex items-center gap-1 font-mono text-lg text-slate-100">
+                <Target size={14} className="text-amber-400" />
+                {stats.bestGroupMoa != null ? `${stats.bestGroupMoa.toFixed(2)} MOA` : '—'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {stats && stats.recipesUsed.length > 0 && (
+          <div>
+            <h3 className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+              Recipes Fired Through This Firearm
+            </h3>
+            <div className="flex flex-col gap-1">
+              {stats.recipesUsed.map((r) => (
+                <div key={r.title} className="flex items-center justify-between text-xs text-slate-400">
+                  <span className="truncate">{r.title}</span>
+                  <span className="font-mono text-slate-300">{r.rounds} rounds</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {firearm.notes && (
+          <div>
+            <h3 className="mb-1 font-mono text-[10px] uppercase tracking-widest text-slate-500">Notes</h3>
+            <p className="whitespace-pre-wrap text-xs text-slate-400">{firearm.notes}</p>
+          </div>
+        )}
+
+        <button
+          onClick={() => onEdit(firearm)}
+          className="rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+        >
+          EDIT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FirearmCard({ firearm, roundsFiredByFirearm, onOpen, onEdit, onDelete }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const totalRounds = totalRoundsForFirearm(firearm, roundsFiredByFirearm);
   const percentUsed = barrelLifePercentUsed(firearm, totalRounds);
@@ -276,7 +419,10 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onEdit, onDelete }) {
     .join(' · ');
 
   return (
-    <div className="flex flex-col gap-3 rounded border border-slate-800 bg-panel p-4">
+    <div
+      onClick={() => onOpen(firearm)}
+      className="flex cursor-pointer flex-col gap-3 rounded border border-amber-500 bg-panel p-4 shadow-[0_0_14px_rgba(245,158,11,0.15)] transition-shadow hover:shadow-[0_0_20px_rgba(245,158,11,0.3)]"
+    >
       <div className="flex items-start gap-3">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-900">
           {firearm.photo_url ? (
@@ -286,7 +432,7 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onEdit, onDelete }) {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-mono text-sm font-bold text-slate-100">{firearm.name}</h3>
+          <h3 className="truncate font-mono text-sm font-bold text-amber-400">{firearm.name}</h3>
           <p className="text-xs text-slate-400">{firearm.caliber?.name}</p>
           {detailLine && <p className="text-xs text-slate-500">{detailLine}</p>}
         </div>
@@ -329,7 +475,10 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onEdit, onDelete }) {
 
       <div className="mt-auto flex items-center gap-2">
         <button
-          onClick={() => onEdit(firearm)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(firearm);
+          }}
           className="flex-1 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
         >
           EDIT
@@ -337,13 +486,19 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onEdit, onDelete }) {
         {confirmingDelete ? (
           <>
             <button
-              onClick={() => onDelete(firearm.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(firearm.id);
+              }}
               className="rounded border border-red-600 bg-red-950 px-3 py-1.5 font-mono text-xs text-red-300 hover:bg-red-900"
             >
               CONFIRM
             </button>
             <button
-              onClick={() => setConfirmingDelete(false)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmingDelete(false);
+              }}
               className="rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-slate-500"
             >
               CANCEL
@@ -351,7 +506,10 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onEdit, onDelete }) {
           </>
         ) : (
           <button
-            onClick={() => setConfirmingDelete(true)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmingDelete(true);
+            }}
             className="rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
             title="Delete"
           >
@@ -376,6 +534,7 @@ export default function FirearmsPage({ authUser }) {
   const [error, setError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editingFirearm, setEditingFirearm] = useState(null);
+  const [viewingFirearm, setViewingFirearm] = useState(null);
 
   useEffect(() => {
     if (!authUser) {
@@ -401,6 +560,7 @@ export default function FirearmsPage({ authUser }) {
       const exists = prev.some((f) => f.id === saved.id);
       return exists ? prev.map((f) => (f.id === saved.id ? saved : f)) : [...prev, saved].sort((a, b) => a.name.localeCompare(b.name));
     });
+    setViewingFirearm((prev) => (prev && prev.id === saved.id ? saved : prev));
   };
 
   const handleDelete = async (firearmId) => {
@@ -462,6 +622,7 @@ export default function FirearmsPage({ authUser }) {
               key={firearm.id}
               firearm={firearm}
               roundsFiredByFirearm={roundsFiredByFirearm}
+              onOpen={(f) => setViewingFirearm(f)}
               onEdit={(f) => {
                 setEditingFirearm(f);
                 setFormOpen(true);
@@ -471,6 +632,18 @@ export default function FirearmsPage({ authUser }) {
           ))}
         </div>
       )}
+
+      <FirearmDetailModal
+        open={!!viewingFirearm}
+        firearm={viewingFirearm}
+        roundsFiredByFirearm={roundsFiredByFirearm}
+        onClose={() => setViewingFirearm(null)}
+        onEdit={(f) => {
+          setViewingFirearm(null);
+          setEditingFirearm(f);
+          setFormOpen(true);
+        }}
+      />
 
       <FirearmFormModal
         open={formOpen}

@@ -69,6 +69,40 @@ export function isNearingBarrelLife(firearm, totalRounds) {
   return firearm.estimated_barrel_life != null && totalRounds >= firearm.estimated_barrel_life;
 }
 
+/** "Fun stats" for a single firearm's detail view — how many range
+ * sessions it's been used for, the best (smallest) group size ever shot
+ * with it, and a breakdown of which recipes have been fired through it
+ * and how many rounds each. All derived from range_sessions rows already
+ * being logged; nothing new to track. `load_recipes(title)` is an
+ * embedded join — RLS on load_recipes already lets the owning user read
+ * their own recipes, so this works the same as any other own-data read. */
+export async function fetchFirearmStats(firearmId) {
+  const { data, error } = await supabase
+    .from('range_sessions')
+    .select('recipe_id, rounds_fired, group_size_moa, load_recipes ( title )')
+    .eq('firearm_id', firearmId);
+  if (error) throw error;
+  const sessions = data || [];
+
+  const sessionCount = sessions.length;
+  const bestGroupMoa = sessions.reduce(
+    (best, s) => (s.group_size_moa != null && (best == null || s.group_size_moa < best) ? s.group_size_moa : best),
+    null
+  );
+
+  const roundsByRecipe = {};
+  sessions.forEach((s) => {
+    if (!s.recipe_id) return;
+    const title = s.load_recipes?.title || 'Unknown recipe';
+    roundsByRecipe[title] = (roundsByRecipe[title] || 0) + (s.rounds_fired || 0);
+  });
+  const recipesUsed = Object.entries(roundsByRecipe)
+    .map(([title, rounds]) => ({ title, rounds }))
+    .sort((a, b) => b.rounds - a.rounds);
+
+  return { sessionCount, bestGroupMoa, recipesUsed };
+}
+
 /** Upload a compressed firearm photo to Supabase Storage and return its
  * public URL — same pattern as uploadTargetImage in lib/recipes.js, just
  * a different bucket/compression profile (see compressFirearmPhoto). */
