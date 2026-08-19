@@ -1,30 +1,131 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, X } from 'lucide-react';
+import QRCode from 'qrcode';
 
 const EXPORT_SIZE = 1080;
 
 // Section 3's Viral Social Overlay Generator: a 1:1 square export card
 // with the target image, shot group overlay, MOA badge, velocity HUD,
-// and a watermark footer — every share is a small ad for the app.
+// and a watermark footer reading "Verified with Precision Load Vault •
+// [Recipe QR Code]" — every share is a small ad for the app.
+//
+// TODO: this currently points the QR code at the app homepage, not the
+// specific recipe. Once a real public recipe page exists (routing +
+// visibility-aware view, see load_recipes.visibility in the schema),
+// switch SHARE_URL below to that recipe's own share URL instead.
+const SHARE_URL = 'https://load-vault.vercel.app';
+
+/** Shorten `text` with an ellipsis so it fits within `maxWidth` px at the
+ * canvas context's current font — canvas text doesn't wrap or truncate on
+ * its own, so long recipe titles/component names need this before being
+ * dropped into a fixed-width footer column. */
+function truncateText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let truncated = text;
+  while (truncated.length > 1 && ctx.measureText(`${truncated}…`).width > maxWidth) {
+    truncated = truncated.slice(0, -1);
+  }
+  return `${truncated}…`;
+}
+
 export default function TargetExportModal({ open, onClose, imageEl, shots, moa, recipe }) {
   const canvasRef = useRef(null);
+  const qrImgRef = useRef(null);
+  const [qrReady, setQrReady] = useState(false);
   const [pngUrl, setPngUrl] = useState(null);
+
+  // Generate the QR code once on mount and cache it as an Image — it
+  // always points at the same URL for now (see SHARE_URL above), so there's
+  // no need to regenerate it every time the target/shots/recipe change.
+  useEffect(() => {
+    let cancelled = false;
+    QRCode.toDataURL(SHARE_URL, {
+      margin: 1,
+      width: 200,
+      color: { dark: '#121619ff', light: '#fbbf24ff' },
+    })
+      .then((dataUrl) => {
+        if (cancelled) return;
+        const img = new Image();
+        img.onload = () => {
+          qrImgRef.current = img;
+          setQrReady(true);
+        };
+        img.src = dataUrl;
+      })
+      .catch((err) => console.error('Failed to generate QR code', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
+    // Three horizontal bands: a stats header, the target photo, and the
+    // watermark footer. The photo is kept perfectly SQUARE (matching the
+    // aspect ratio it was plotted at in TargetCalculator's canvas) and
+    // centered, rather than stretched to fill a non-square gap — any
+    // leftover width becomes plain side margins instead of distorting
+    // the image.
+    const HEADER_HEIGHT = 230;
+    const FOOTER_HEIGHT = 190;
+    const PHOTO_SIZE = EXPORT_SIZE - HEADER_HEIGHT - FOOTER_HEIGHT;
+    const PHOTO_TOP = HEADER_HEIGHT;
+    const PHOTO_LEFT = (EXPORT_SIZE - PHOTO_SIZE) / 2;
+
     ctx.fillStyle = '#121619';
     ctx.fillRect(0, 0, EXPORT_SIZE, EXPORT_SIZE);
 
+    // --- Header: MOA badge + the three FPS stats, sized to actually be
+    // readable on a phone screen at social-post size. ---
+    ctx.fillStyle = 'rgba(18, 22, 25, 0.95)';
+    ctx.fillRect(0, 0, EXPORT_SIZE, HEADER_HEIGHT);
+
+    const moaBoxWidth = 260;
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(24, 24, moaBoxWidth, HEADER_HEIGHT - 48);
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = 'bold 80px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(moa != null ? moa.toFixed(2) : '—', 44, 132);
+    ctx.font = '24px monospace';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('MOA', 44, 174);
+
+    const statsX = 24 + moaBoxWidth + 24;
+    const statsWidth = EXPORT_SIZE - statsX - 24;
+    ctx.strokeStyle = '#334155';
+    ctx.strokeRect(statsX, 24, statsWidth, HEADER_HEIGHT - 48);
+    const stats = [
+      { label: 'AVG FPS', value: recipe.avgVelocity },
+      { label: 'FPS SD', value: recipe.stdDevFps },
+      { label: 'FPS ES', value: recipe.extremeSpread },
+    ];
+    const colWidth = statsWidth / 3;
+    ctx.textAlign = 'center';
+    stats.forEach((stat, i) => {
+      const colCenter = statsX + colWidth * i + colWidth / 2;
+      ctx.fillStyle = '#f1f5f9';
+      ctx.font = 'bold 52px monospace';
+      ctx.fillText(stat.value != null ? String(stat.value) : '—', colCenter, 119);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '24px monospace';
+      ctx.fillText(stat.label, colCenter, 164);
+    });
+    ctx.textAlign = 'left';
+
+    // --- Target photo, square and centered ---
     if (imageEl) {
-      ctx.drawImage(imageEl, 0, 0, EXPORT_SIZE, EXPORT_SIZE);
+      ctx.drawImage(imageEl, PHOTO_LEFT, PHOTO_TOP, PHOTO_SIZE, PHOTO_SIZE);
     }
 
     (shots || []).forEach((shot) => {
-      const x = shot.x * EXPORT_SIZE;
-      const y = shot.y * EXPORT_SIZE;
+      const x = PHOTO_LEFT + shot.x * PHOTO_SIZE;
+      const y = PHOTO_TOP + shot.y * PHOTO_SIZE;
       ctx.strokeStyle = '#f59e0b';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -32,38 +133,57 @@ export default function TargetExportModal({ open, onClose, imageEl, shots, moa, 
       ctx.stroke();
     });
 
-    // MOA badge, top-left
-    ctx.fillStyle = 'rgba(18, 22, 25, 0.85)';
-    ctx.fillRect(24, 24, 220, 100);
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(24, 24, 220, 100);
+    // --- Watermark footer — text on the left, a bigger scannable QR code
+    // on the right. ---
+    const footerTop = EXPORT_SIZE - FOOTER_HEIGHT;
+    ctx.fillStyle = 'rgba(18, 22, 25, 0.95)';
+    ctx.fillRect(0, footerTop, EXPORT_SIZE, FOOTER_HEIGHT);
+
     ctx.fillStyle = '#fbbf24';
-    ctx.font = 'bold 48px monospace';
-    ctx.fillText(moa != null ? moa.toFixed(2) : '—', 44, 84);
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText('Verified with', 24, footerTop + 56);
+    ctx.font = 'bold 32px monospace';
+    ctx.fillText('PRECISION LOAD VAULT', 24, footerTop + 96);
     ctx.font = '16px monospace';
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('MOA', 44, 108);
+    ctx.fillText(SHARE_URL.replace('https://', ''), 24, footerTop + 126);
 
-    // Velocity HUD, top-right
-    ctx.fillStyle = 'rgba(18, 22, 25, 0.85)';
-    ctx.fillRect(EXPORT_SIZE - 300, 24, 276, 100);
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(EXPORT_SIZE - 300, 24, 276, 100);
-    ctx.fillStyle = '#f1f5f9';
-    ctx.font = 'bold 28px monospace';
-    ctx.fillText(`${recipe.avgVelocity} FPS AVG`, EXPORT_SIZE - 284, 60);
-    ctx.font = '16px monospace';
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText(`SD ${recipe.stdDevFps}  ES ${recipe.extremeSpread}`, EXPORT_SIZE - 284, 90);
+    const qrSize = FOOTER_HEIGHT - 40;
+    const qrX = EXPORT_SIZE - qrSize - 32;
+    const qrY = footerTop + 20;
 
-    // Watermark footer
-    ctx.fillStyle = 'rgba(18, 22, 25, 0.85)';
-    ctx.fillRect(0, EXPORT_SIZE - 60, EXPORT_SIZE, 60);
-    ctx.fillStyle = '#fbbf24';
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText('Verified with Precision Load Vault', 24, EXPORT_SIZE - 24);
+    // Load details, filling the middle gap between the watermark text and
+    // the QR code — the actual useful info for anyone screenshotting this
+    // off social media, not just branding.
+    const loadX = 456;
+    const loadMaxWidth = qrX - 32 - loadX;
+    if (loadMaxWidth > 80) {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#f1f5f9';
+      ctx.font = 'bold 26px monospace';
+      ctx.fillText(truncateText(ctx, recipe.title, loadMaxWidth), loadX, footerTop + 46);
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '26px monospace';
+      ctx.fillText(truncateText(ctx, recipe.caliber, loadMaxWidth), loadX, footerTop + 74);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '24px monospace';
+      const chargeLine = `${recipe.chargeGrains ?? '—'}gr ${recipe.powder} / ${recipe.bullet}`;
+      ctx.fillText(truncateText(ctx, chargeLine, loadMaxWidth), loadX, footerTop + 98);
+
+      if (recipe.coalInches) {
+        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 122);
+      }
+    }
+    if (qrImgRef.current) {
+      ctx.drawImage(qrImgRef.current, qrX, qrY, qrSize, qrSize);
+    } else {
+      // Still generating — draw a placeholder outline so layout doesn't jump.
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(qrX, qrY, qrSize, qrSize);
+    }
 
     canvas.toBlob((blob) => {
       if (blob) setPngUrl((prev) => {
@@ -71,7 +191,7 @@ export default function TargetExportModal({ open, onClose, imageEl, shots, moa, 
         return URL.createObjectURL(blob);
       });
     }, 'image/png');
-  }, [open, imageEl, shots, moa, recipe]);
+  }, [open, imageEl, shots, moa, recipe, qrReady]);
 
   if (!open) return null;
 
