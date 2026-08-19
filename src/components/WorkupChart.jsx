@@ -152,16 +152,44 @@ export default function WorkupChart({ rungs }) {
     usable.length >= 2 ? linearRegression(usable.map((r) => ({ x: r.chargeGrains, y: r.avgVelocity }))) : null;
 
   // "Erratic" flag — a rung whose SD is notably higher (>1.5×) than the
-  // median SD across this ladder's other rungs. Purely a statistical
-  // comparison within the ladder, not a claim about pressure signs or
-  // where the useful node is — deliberately more conservative than that
-  // (see the component doc comment). Needs at least 3 rungs with SD data
-  // for "median" to mean anything.
-  const sdValues = usable.map((r) => r.stdDevFps).filter((v) => v != null);
-  const sdMedian = sdValues.length >= 3 ? median(sdValues) : null;
-  const isErratic = (r) => sdMedian != null && r.stdDevFps != null && r.stdDevFps > sdMedian * 1.5;
+  // median SD of this ladder's OTHER rungs (leave-one-out, so a flagged
+  // rung's own high SD can't drag up the number it's being compared
+  // against). Purely a statistical comparison within the ladder, not a
+  // claim about pressure signs or where the useful node is — deliberately
+  // more conservative than that (see the component doc comment). Needs at
+  // least 2 other rungs with SD data for "median" to mean anything, i.e.
+  // 3 rungs total.
+  const rungsWithSd = usable.filter((r) => r.stdDevFps != null);
+  function otherRungsMedianSd(r) {
+    const others = rungsWithSd.filter((o) => o.id !== r.id).map((o) => o.stdDevFps);
+    return others.length >= 2 ? median(others) : null;
+  }
+  const isErratic = (r) => {
+    const m = otherRungsMedianSd(r);
+    return m != null && r.stdDevFps != null && r.stdDevFps > m * 1.5;
+  };
   const anyErratic = usable.some(isErratic);
   const erraticRungs = usable.filter(isErratic);
+
+  // Segment climb rates (fps per grain) between consecutive rungs — purely
+  // descriptive, same restraint as the trend line: it names the RATE, not
+  // "the node." Sorted defensively by charge in case the rungs prop ever
+  // arrives out of order.
+  const sortedByCharge = [...usable].sort((a, b) => a.chargeGrains - b.chargeGrains);
+  const segments = sortedByCharge
+    .slice(1)
+    .map((r, i) => {
+      const prev = sortedByCharge[i];
+      const deltaGr = r.chargeGrains - prev.chargeGrains;
+      if (!deltaGr) return null;
+      return { from: prev.chargeGrains, to: r.chargeGrains, rate: (r.avgVelocity - prev.avgVelocity) / deltaGr };
+    })
+    .filter(Boolean);
+
+  // Small-sample caveat — 5 shots/rung is a normal ladder-test size, but SD
+  // and ES computed from that few shots are noisier than they look, and a
+  // beginner reading "SD 74.6" has no way to know that on their own.
+  const smallSampleRungs = usable.filter((r) => r.shots.length > 0 && r.shots.length < 5);
 
   const active = activeId != null ? usable.find((r) => r.id === activeId) : null;
 
@@ -367,17 +395,77 @@ export default function WorkupChart({ rungs }) {
         {erraticRungs.length > 0 && (
           <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />
         )}
-        <div className="space-y-1.5">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          {/* Per-rung spread warnings — the only part of this box that's
+              actually a flag, not just a fact. */}
           {erraticRungs.map((r) => (
             <p key={r.id}>
-              <span className="font-mono font-semibold">{r.chargeGrains} gr</span> has the widest shot-to-shot
-              spread in this ladder (SD {r.stdDevFps} fps vs. a {sdMedian} fps median across the other rungs).
-              Inconsistent velocity at a single charge can be an early sign of a pressure-sensitive spot — check
-              for pressure signs (flattened or cratered primers, hard bolt lift, ejector marks) and consider
-              testing smaller increments around this charge before drawing conclusions from the average alone.
+              <span className="font-mono font-semibold">{r.chargeGrains} gr</span> has a notably wider
+              shot-to-shot spread than the rest of this ladder (SD {r.stdDevFps} fps vs. a{' '}
+              {otherRungsMedianSd(r)} fps median for the other rungs). Inconsistent velocity at a single charge
+              can be an early sign of a pressure-sensitive spot — check for pressure signs (flattened or
+              cratered primers, hard bolt lift, ejector marks) and consider testing smaller increments around
+              this charge before drawing conclusions from the average alone.
             </p>
           ))}
-          <p className={erraticRungs.length > 0 ? 'text-amber-300/70' : ''}>
+
+          {/* Segment climb rates — purely descriptive (fps per grain
+              between each pair of tested rungs), never labeled as "the
+              node." Same neutral tone whether or not anything's flagged
+              above, so a divider separates it when the amber block is
+              present. */}
+          {segments.length > 0 && (
+            <p
+              className={
+                erraticRungs.length > 0
+                  ? 'border-t border-amber-700/40 pt-1.5 text-amber-200/80'
+                  : 'text-slate-400'
+              }
+            >
+              {segments.length === 1 ? (
+                <>
+                  Velocity climbed{' '}
+                  <span className="font-mono">
+                    {segments[0].rate >= 0 ? '+' : ''}
+                    {segments[0].rate.toFixed(1)} fps/gr
+                  </span>{' '}
+                  from {segments[0].from} to {segments[0].to} gr.
+                </>
+              ) : (
+                <>
+                  Velocity climbed unevenly across this ladder:{' '}
+                  {segments
+                    .map(
+                      (s) =>
+                        `${s.from}→${s.to}gr ${s.rate >= 0 ? '+' : ''}${s.rate.toFixed(1)} fps/gr`
+                    )
+                    .join(', ')}
+                  .
+                </>
+              )}
+            </p>
+          )}
+
+          {/* Small-sample caveat — only when it applies, same neutral tone. */}
+          {smallSampleRungs.length > 0 && (
+            <p className={erraticRungs.length > 0 ? 'text-amber-200/80' : 'text-slate-400'}>
+              {smallSampleRungs.length === 1
+                ? `The ${smallSampleRungs[0].chargeGrains}gr rung is`
+                : `${smallSampleRungs.map((r) => `${r.chargeGrains}gr`).join(', ')} rungs are`}{' '}
+              based on fewer than 5 shots — SD and ES from a small sample can look worse (or better) than the
+              load actually is.
+            </p>
+          )}
+
+          {/* Standing safety boilerplate — always present, visually set
+              apart from the data-specific text above it so a beginner can
+              tell "about my ladder" from "generic advice you'll see every
+              time" at a glance. */}
+          <p
+            className={`border-t pt-1.5 ${
+              erraticRungs.length > 0 ? 'border-amber-700/40 text-amber-300/60' : 'border-slate-700 text-slate-500'
+            }`}
+          >
             Always work up loads in small increments, stay at or below your load manual's published maximum, and
             watch for pressure signs as you go. These are automatic statistical observations, not a safety
             verdict — never load based on velocity data alone.

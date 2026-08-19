@@ -439,7 +439,10 @@ function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
                 Rungs
                 <InfoTooltip>
                   Each row is one charge weight you've tested — sorted lightest to heaviest, the order
-                  you'd actually read a ladder test in.
+                  you'd actually read a ladder test in. SD = standard deviation, how much shot-to-shot
+                  velocity varies (lower = more consistent). ES = extreme spread, the fastest shot minus
+                  the slowest, in fps. MOA = minutes of angle, group size adjusted for distance so groups
+                  at different ranges are comparable.
                 </InfoTooltip>
               </h3>
               {workup.rungs.length === 0 ? (
