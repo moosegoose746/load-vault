@@ -194,6 +194,7 @@ export default function Sidebar({
   activeRecipeId,
   onSelectRecipe,
   onNewRecipe,
+  onEditRecipe,
   onDeleteRecipe,
   onRecipeUpdated,
   liveMoa,
@@ -229,13 +230,25 @@ export default function Sidebar({
             </option>
           ))}
         </select>
-        <button
-          onClick={onNewRecipe}
-          className="flex items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
-        >
-          <Plus size={14} />
-          NEW RECIPE
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={onNewRecipe}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+          >
+            <Plus size={14} />
+            NEW RECIPE
+          </button>
+          {activeRecipeId && (
+            <button
+              onClick={() => onEditRecipe?.(activeRecipeId)}
+              title="Edit this recipe"
+              aria-label="Edit this recipe"
+              className="flex items-center justify-center rounded border border-slate-700 px-3 py-1.5 text-slate-300 hover:border-amber-500 hover:text-amber-400"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+        </div>
 
         {activeRecipeId &&
           (confirmingDelete ? (

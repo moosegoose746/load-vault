@@ -473,6 +473,55 @@ export async function createRecipe(fields, userId) {
   return data;
 }
 
+/** Full recipe edit — every field RecipeForm collects, including the five
+ * core components and charge weight. Deliberately no snapshotting: cost
+ * per round, Money Saved, and inventory-deduction matching are ALWAYS
+ * computed from a recipe's CURRENT component links (see
+ * costForComponent/calculateCostPerRound above), never from whatever they
+ * were at the time a past Loading/Range Session was logged. So editing a
+ * recipe's components after it already has history retroactively changes
+ * its past cost figures too — RecipeForm warns the user about this before
+ * saving when `fetchRecipeHasHistory` says there's session history to
+ * lose accuracy on, but the write itself here doesn't gate on it; that's
+ * a UI-layer confirmation, not a data-integrity rule. */
+export async function updateRecipe(recipeId, fields) {
+  const { data, error } = await supabase
+    .from('load_recipes')
+    .update({
+      title: fields.title,
+      caliber_id: fields.caliberId,
+      powder_id: fields.powderId || null,
+      charge_weight_grains: fields.chargeGrains,
+      bullet_id: fields.bulletId || null,
+      primer_id: fields.primerId || null,
+      brass_id: fields.brassId || null,
+      coal_inches: fields.coalInches || null,
+      firearm_id: fields.firearmId || null,
+      notes: fields.notes || null,
+      factory_price_per_round: fields.factoryPricePerRound || null,
+    })
+    .eq('id', recipeId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Whether a recipe has ANY logged history (a Loading Session or a Range
+ * Session) — used purely to decide whether RecipeForm should warn before
+ * saving an edit to its core components/charge weight (see updateRecipe
+ * above for why that matters). Two small `head: true, count: 'exact'`
+ * queries rather than fetching real rows — this only needs a yes/no. */
+export async function fetchRecipeHasHistory(recipeId) {
+  const [batches, sessions] = await Promise.all([
+    supabase.from('load_batches').select('id', { head: true, count: 'exact' }).eq('recipe_id', recipeId),
+    supabase.from('range_sessions').select('id', { head: true, count: 'exact' }).eq('recipe_id', recipeId),
+  ]);
+  if (batches.error) throw batches.error;
+  if (sessions.error) throw sessions.error;
+  return (batches.count || 0) > 0 || (sessions.count || 0) > 0;
+}
+
 /** Lifetime money saved across EVERY recipe the user has given a
  * Comparable Factory Price — same math as the per-recipe `moneySaved` in
  * mapRecipeRow ((factoryPrice - costPerRound) * total rounds ever

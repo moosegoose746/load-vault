@@ -103,6 +103,11 @@ function AppShell() {
   const [activeRecipeId, setActiveRecipeId] = useState(null); // null = demo recipe
   const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
   const [recipeFormOpen, setRecipeFormOpen] = useState(false);
+  // RecipeForm doubles as create/edit — 'edit' shows it pre-filled with
+  // the currently active recipe (see Sidebar's pencil button); reset to
+  // 'create' whenever it closes so it doesn't accidentally reopen in
+  // edit mode later for an unrelated reason.
+  const [recipeFormMode, setRecipeFormMode] = useState('create'); // 'create' | 'edit'
   const [recipeError, setRecipeError] = useState('');
   // Live MOA reading from the Target Analysis section (Dashboard), lifted up
   // here so the Sidebar's MOA badge can reflect shots being plotted right
@@ -249,7 +254,14 @@ function AppShell() {
               userRecipes={userRecipes}
               activeRecipeId={activeRecipeId}
               onSelectRecipe={setActiveRecipeId}
-              onNewRecipe={() => setRecipeFormOpen(true)}
+              onNewRecipe={() => {
+                setRecipeFormMode('create');
+                setRecipeFormOpen(true);
+              }}
+              onEditRecipe={() => {
+                setRecipeFormMode('edit');
+                setRecipeFormOpen(true);
+              }}
               onDeleteRecipe={handleDeleteRecipe}
               onRecipeUpdated={handleRecipeDataChanged}
               liveMoa={liveMoa}
@@ -274,11 +286,25 @@ function AppShell() {
 
       <RecipeForm
         open={recipeFormOpen}
-        onClose={() => setRecipeFormOpen(false)}
+        editingRecipe={recipeFormMode === 'edit' ? activeRecipe : null}
+        onClose={() => {
+          setRecipeFormOpen(false);
+          setRecipeFormMode('create');
+        }}
         onCreated={(newId) => {
           refreshRecipeList();
           refreshLifetimeSaved();
           setActiveRecipeId(newId);
+        }}
+        onUpdated={() => {
+          // Unlike onCreated, activeRecipeId doesn't change here — the
+          // edited recipe IS the active one already — so explicitly
+          // refetch both its detail (title/components/notes/etc. may
+          // have changed) and the account-wide lifetime-saved total
+          // (factory price or components may have too), plus the recipe
+          // list in case the title changed.
+          refreshRecipeList();
+          handleRecipeDataChanged();
         }}
         authUser={auth.user}
       />
