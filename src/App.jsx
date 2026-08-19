@@ -6,6 +6,7 @@ import Header from './components/Header.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import RecipeForm from './components/RecipeForm.jsx';
+import InventoryPage from './components/InventoryPage.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import { archiveRecipe, fetchRecipeDetail, fetchUserRecipes } from './lib/recipes.js';
 
@@ -86,6 +87,7 @@ function AppShell() {
   const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
   const loading = DEV_SKIP_AUTH ? false : auth.loading;
 
+  const [view, setView] = useState('vault'); // 'vault' | 'inventory'
   const [userRecipes, setUserRecipes] = useState([]);
   const [activeRecipeId, setActiveRecipeId] = useState(null); // null = demo recipe
   const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
@@ -112,7 +114,10 @@ function AppShell() {
       return;
     }
     try {
-      const detail = await fetchRecipeDetail(activeRecipeId);
+      // auth.user?.id is passed so cost-per-round can be computed from the
+      // signed-in user's own saved inventory pricing — see
+      // fetchRecipeDetail / calculateCostPerRound in lib/recipes.js.
+      const detail = await fetchRecipeDetail(activeRecipeId, auth.user?.id);
       setActiveRecipe(detail);
       setRecipeError('');
     } catch (err) {
@@ -120,7 +125,7 @@ function AppShell() {
       setRecipeError('Failed to load that recipe.');
       setActiveRecipe(mockRecipe);
     }
-  }, [activeRecipeId]);
+  }, [activeRecipeId, auth.user]);
 
   useEffect(() => {
     refreshRecipeList();
@@ -172,27 +177,31 @@ function AppShell() {
           DEV MODE — AUTH BYPASSED (local only, set by VITE_SKIP_AUTH in .env)
         </div>
       )}
-      <Header user={user} onSignOut={auth.signOut} />
+      <Header user={user} onSignOut={auth.signOut} view={view} onChangeView={setView} />
       {user ? (
-        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
-          <Sidebar
-            recipe={activeRecipe}
-            userRecipes={userRecipes}
-            activeRecipeId={activeRecipeId}
-            onSelectRecipe={setActiveRecipeId}
-            onNewRecipe={() => setRecipeFormOpen(true)}
-            onDeleteRecipe={handleDeleteRecipe}
-            liveMoa={liveMoa}
-          />
-          <Dashboard
-            key={activeRecipeId ?? 'demo'}
-            recipe={activeRecipe}
-            activeRecipeId={activeRecipeId}
-            authUser={auth.user}
-            onSessionSaved={loadActiveRecipe}
-            onTargetChange={setLiveMoa}
-          />
-        </div>
+        view === 'inventory' ? (
+          <InventoryPage authUser={auth.user} />
+        ) : (
+          <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
+            <Sidebar
+              recipe={activeRecipe}
+              userRecipes={userRecipes}
+              activeRecipeId={activeRecipeId}
+              onSelectRecipe={setActiveRecipeId}
+              onNewRecipe={() => setRecipeFormOpen(true)}
+              onDeleteRecipe={handleDeleteRecipe}
+              liveMoa={liveMoa}
+            />
+            <Dashboard
+              key={activeRecipeId ?? 'demo'}
+              recipe={activeRecipe}
+              activeRecipeId={activeRecipeId}
+              authUser={auth.user}
+              onSessionSaved={loadActiveRecipe}
+              onTargetChange={setLiveMoa}
+            />
+          </div>
+        )
       ) : (
         <SignInGate onSignIn={auth.signInWithEmail} />
       )}

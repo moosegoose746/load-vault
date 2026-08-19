@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { fetchUserInventory } from './inventory.js';
 
 // Real Supabase-backed recipe data layer. Everything here maps Postgres
 // rows into the same flat "recipe view model" shape `src/data/mockRecipe.js`
@@ -36,7 +37,46 @@ export async function fetchUserRecipes(userId) {
   return data;
 }
 
-function mapRecipeRow(row, session, shots) {
+/** Cost of one unit of a component (one bullet, one primer, one case, or —
+ * for powder — one grain), from the user's OWN saved inventory pricing —
+ * never the shared `components.unit_cost` catalog field, which is just
+ * generic placeholder data (see schema_inventory.sql). `inventory` is a
+ * map of component_id -> user_inventory row, from fetchUserInventory().
+ * Returns `null` (not 0) when the component is selected but the user
+ * hasn't entered a price for it yet, so callers can tell "free/not
+ * applicable" apart from "unknown cost" instead of silently
+ * under-counting the total. `reloadCycles` divides the per-unit cost
+ * further — only meaningful for brass (amortizing a case's cost across
+ * multiple reloadings); everything else passes 1 (no-op). */
+function costForComponent(component, inventory, quantity = 1, reloadCycles = 1) {
+  if (!component) return 0; // nothing selected for this slot — not applicable
+  const entry = inventory?.[component.id];
+  if (!entry) return null;
+  const cycles = reloadCycles && reloadCycles > 0 ? reloadCycles : 1;
+  return ((entry.unit_cost / entry.package_qty) * quantity) / cycles;
+}
+
+/** Cost-per-round for a recipe, using the signed-in user's own saved
+ * component pricing (see costForComponent above). Powder cost scales with
+ * charge weight (package_qty for powder is in grains), bullet/primer are
+ * flat one-per-round costs, and brass is divided by however many reload
+ * cycles the user estimated for it (defaulting to 1 / single-use if they
+ * haven't set one) — matching the master doc's cost formula. Returns
+ * `null` if ANY selected component has no saved price yet, rather than
+ * silently showing a partial (understated) total. */
+function calculateCostPerRound(row, inventory) {
+  const brassEntry = row.brass ? inventory?.[row.brass.id] : null;
+  const parts = [
+    costForComponent(row.powder, inventory, row.charge_weight_grains ?? 0),
+    costForComponent(row.bullet, inventory),
+    costForComponent(row.primer, inventory),
+    costForComponent(row.brass, inventory, 1, brassEntry?.reload_cycles),
+  ];
+  if (parts.some((p) => p == null)) return null;
+  return parts.reduce((sum, p) => sum + p, 0);
+}
+
+function mapRecipeRow(row, session, shots, inventory) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
   return {
     id: row.id,
@@ -55,28 +95,34 @@ function mapRecipeRow(row, session, shots) {
     stdDevFps: session?.std_dev_fps ?? null,
     extremeSpread: session?.extreme_spread_fps ?? null,
     targetImageUrl: session?.target_image_url ?? null,
-    costPerRound: null, // wired up in a later phase (Cost-Per-Round calculator)
+    costPerRound: calculateCostPerRound(row, inventory),
     shots: shots ?? [],
   };
 }
 
 /** Fetch one recipe, joined with its component names, its most recent range
- * session, and that session's per-shot velocity log. Note: only the target
- * *photo* is restorable — the individual shot-hole coordinates plotted on
- * the canvas aren't persisted anywhere in the schema (no column for them),
- * so reopening a saved recipe shows the saved photo but not the shot
- * markers on it; re-plotting starts fresh on top of the restored photo. */
-export async function fetchRecipeDetail(recipeId) {
+ * session, that session's per-shot velocity log, and — if `userId` is
+ * given — the signed-in user's own saved pricing for whichever components
+ * this recipe uses, to compute a real cost-per-round (see
+ * calculateCostPerRound above and schema_inventory.sql for why pricing
+ * isn't just read off the shared `components` catalog).
+ *
+ * Note: only the target *photo* is restorable — the individual shot-hole
+ * coordinates plotted on the canvas aren't persisted anywhere in the
+ * schema (no column for them), so reopening a saved recipe shows the
+ * saved photo but not the shot markers on it; re-plotting starts fresh on
+ * top of the restored photo. */
+export async function fetchRecipeDetail(recipeId, userId) {
   const { data: row, error } = await supabase
     .from('load_recipes')
     .select(
       `
       id, title, charge_weight_grains, coal_inches, rifle_model, notes,
       calibers ( name ),
-      powder:components!load_recipes_powder_id_fkey ( brand, model ),
-      bullet:components!load_recipes_bullet_id_fkey ( brand, model ),
-      primer:components!load_recipes_primer_id_fkey ( brand, model ),
-      brass:components!load_recipes_brass_id_fkey ( brand, model )
+      powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
+      bullet:components!load_recipes_bullet_id_fkey ( id, brand, model ),
+      primer:components!load_recipes_primer_id_fkey ( id, brand, model ),
+      brass:components!load_recipes_brass_id_fkey ( id, brand, model )
     `
     )
     .eq('id', recipeId)
@@ -103,7 +149,9 @@ export async function fetchRecipeDetail(recipeId) {
     shots = (shotRows || []).map((r) => r.velocity_fps);
   }
 
-  return mapRecipeRow(row, latestSession, shots);
+  const inventory = userId ? await fetchUserInventory(userId) : {};
+
+  return mapRecipeRow(row, latestSession, shots, inventory);
 }
 
 /** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
