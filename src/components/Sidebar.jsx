@@ -116,6 +116,14 @@ export default function Sidebar({
           label="Cost / Round"
           value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}
         />
+        <SpecRow
+          label="Rounds Remaining"
+          value={
+            recipe.roundsRemaining != null
+              ? `${recipe.roundsRemaining} (${recipe.bottleneck})`
+              : '—'
+          }
+        />
       </div>
     </aside>
   );

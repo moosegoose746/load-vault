@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Plus, Trash2 } from 'lucide-react';
 import {
   GRAINS_PER_LB,
   addInventoryEntry,
   deleteInventoryEntry,
   fetchAllComponents,
   fetchUserInventoryRows,
+  isBrassNearingRetirement,
+  isLowStock,
   updateInventoryEntry,
 } from '../lib/inventory.js';
 
@@ -29,20 +31,29 @@ const CUSTOM_VALUE = '__custom__';
 const inputClass =
   'w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none';
 
+// Powder's lbs display is derived by dividing a grains value by 7000, which
+// produces long floating-point tails (e.g. 500/7000 = 0.07142857142857142)
+// that don't mean anything at that precision for a real-world scale.
+// Rounding to 3 decimal places (roughly a tenth of a grain) keeps the
+// number readable without losing anything a reloader would actually use.
+const POWDER_DECIMALS = 3;
+
 function draftFromRow(row, isPowder) {
   const packageQty = row.package_qty != null ? (isPowder ? row.package_qty / GRAINS_PER_LB : row.package_qty) : '';
   const quantityOnHand =
     row.quantity_on_hand != null ? (isPowder ? row.quantity_on_hand / GRAINS_PER_LB : row.quantity_on_hand) : '';
   return {
     unitCost: row.unit_cost != null ? String(row.unit_cost) : '',
-    packageQty: packageQty !== '' ? String(packageQty) : '',
-    quantityOnHand: quantityOnHand !== '' ? String(quantityOnHand) : '',
+    packageQty: packageQty !== '' ? String(isPowder ? Number(packageQty.toFixed(POWDER_DECIMALS)) : packageQty) : '',
+    quantityOnHand:
+      quantityOnHand !== '' ? String(isPowder ? Number(quantityOnHand.toFixed(POWDER_DECIMALS)) : quantityOnHand) : '',
     reloadCycles: row.reload_cycles != null ? String(row.reload_cycles) : '',
+    cyclesUsed: row.cycles_used != null ? String(row.cycles_used) : '0',
   };
 }
 
 function emptyDraft() {
-  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '' };
+  return { unitCost: '', packageQty: '', quantityOnHand: '', reloadCycles: '', cyclesUsed: '' };
 }
 
 function emptyNewRow() {
@@ -67,6 +78,7 @@ function parseDraft(draft, isPowder) {
     packageQty,
     quantityOnHand,
     reloadCycles: draft.reloadCycles !== '' ? Number.parseInt(draft.reloadCycles, 10) : null,
+    cyclesUsed: draft.cyclesUsed !== '' && draft.cyclesUsed != null ? Number.parseInt(draft.cyclesUsed, 10) : 0,
   };
 }
 
@@ -253,14 +265,19 @@ export default function InventoryPage({ authUser }) {
                       <th className="px-3 py-2">{isPowder ? 'Container Weight (lbs)' : 'Qty per Package'}</th>
                       <th className="px-3 py-2">{isPowder ? 'Cost/Grain' : 'Cost/Unit'}</th>
                       <th className="px-3 py-2">Qty On Hand{isPowder ? ' (lbs)' : ''}</th>
-                      {type === 'brass' && <th className="px-3 py-2">Reload Cycles (est.)</th>}
+                      {type === 'brass' && (
+                        <>
+                          <th className="px-3 py-2">Reload Cycles (est.)</th>
+                          <th className="px-3 py-2">Cycles Used</th>
+                        </>
+                      )}
                       <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {sectionRows.length === 0 && (
                       <tr>
-                        <td colSpan={type === 'brass' ? 6 : 5} className="px-3 py-3 text-center text-xs text-slate-600">
+                        <td colSpan={type === 'brass' ? 7 : 5} className="px-3 py-3 text-center text-xs text-slate-600">
                           No {label.toLowerCase()} tracked yet.
                         </td>
                       </tr>
@@ -269,6 +286,8 @@ export default function InventoryPage({ authUser }) {
                       const displayName = row.component ? `${row.component.brand} ${row.component.model}` : row.custom_name;
                       const draft = drafts[row.id] ?? draftFromRow(row, isPowder);
                       const rstatus = rowStatus[row.id];
+                      const lowStock = isLowStock(row);
+                      const nearingRetirement = type === 'brass' && isBrassNearingRetirement(row);
                       return (
                         <tr key={row.id} className="border-b border-slate-800/60 last:border-0">
                           <td className="px-3 py-2 align-top">
@@ -318,19 +337,43 @@ export default function InventoryPage({ authUser }) {
                               onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
                               className={`${inputClass} w-24`}
                             />
+                            {lowStock && (
+                              <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-[10px] text-amber-400">
+                                <AlertTriangle size={10} />
+                                Running low
+                              </p>
+                            )}
                           </td>
                           {type === 'brass' && (
-                            <td className="px-3 py-2 align-top">
-                              <input
-                                type="number"
-                                step="1"
-                                min="1"
-                                placeholder="1"
-                                value={draft.reloadCycles}
-                                onChange={(e) => updateDraft(row.id, 'reloadCycles', e.target.value)}
-                                className={`${inputClass} w-20`}
-                              />
-                            </td>
+                            <>
+                              <td className="px-3 py-2 align-top">
+                                <input
+                                  type="number"
+                                  step="1"
+                                  min="1"
+                                  placeholder="1"
+                                  value={draft.reloadCycles}
+                                  onChange={(e) => updateDraft(row.id, 'reloadCycles', e.target.value)}
+                                  className={`${inputClass} w-20`}
+                                />
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <input
+                                  type="number"
+                                  step="1"
+                                  min="0"
+                                  value={draft.cyclesUsed}
+                                  onChange={(e) => updateDraft(row.id, 'cyclesUsed', e.target.value)}
+                                  className={`${inputClass} w-20`}
+                                />
+                                {nearingRetirement && (
+                                  <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-[10px] text-amber-400">
+                                    <AlertTriangle size={10} />
+                                    Nearing max — inspect/retire
+                                  </p>
+                                )}
+                              </td>
+                            </>
                           )}
                           <td className="px-3 py-2 align-top">
                             <div className="flex items-center gap-2">
@@ -427,19 +470,22 @@ export default function InventoryPage({ authUser }) {
                         />
                       </td>
                       {type === 'brass' && (
-                        <td className="px-3 py-2 align-top">
-                          <input
-                            type="number"
-                            step="1"
-                            min="1"
-                            placeholder="1"
-                            value={newRow.reloadCycles}
-                            onChange={(e) =>
-                              setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], reloadCycles: e.target.value } }))
-                            }
-                            className={`${inputClass} w-20`}
-                          />
-                        </td>
+                        <>
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              type="number"
+                              step="1"
+                              min="1"
+                              placeholder="1"
+                              value={newRow.reloadCycles}
+                              onChange={(e) =>
+                                setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], reloadCycles: e.target.value } }))
+                              }
+                              className={`${inputClass} w-20`}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-600">0</td>
+                        </>
                       )}
                       <td className="px-3 py-2 align-top">
                         <button

@@ -76,6 +76,35 @@ function calculateCostPerRound(row, inventory) {
   return parts.reduce((sum, p) => sum + p, 0);
 }
 
+/** How many more complete rounds this recipe could be loaded with, given
+ * the signed-in user's current Qty On Hand for whichever components they
+ * actually track — bottlenecked by whichever tracked component would run
+ * out first. Components with no saved Qty On Hand are simply skipped
+ * (unknown, not zero) rather than forcing the whole estimate to `null` —
+ * unlike cost-per-round, a partial answer ("at least 40, limited by
+ * primers") is still useful even if powder isn't tracked yet. Returns
+ * `{ roundsRemaining: null, bottleneck: null }` if nothing on this recipe
+ * is tracked at all. Brass uses its Qty On Hand (case count) here, same
+ * as everything else — separate from cycles_used/reload_cycles, which is
+ * about a batch of brass wearing out, not how many cases exist. */
+function calculateRoundsRemaining(row, inventory) {
+  const parts = [];
+  const add = (component, label, perRoundAmount) => {
+    if (!component || !(perRoundAmount > 0)) return;
+    const entry = inventory?.[component.id];
+    if (!entry || entry.quantity_on_hand == null) return;
+    parts.push({ label, rounds: Math.floor(entry.quantity_on_hand / perRoundAmount) });
+  };
+  add(row.powder, `${row.powder?.brand} ${row.powder?.model}`, row.charge_weight_grains ?? 0);
+  add(row.bullet, `${row.bullet?.brand} ${row.bullet?.model}`, 1);
+  add(row.primer, `${row.primer?.brand} ${row.primer?.model}`, 1);
+  add(row.brass, `${row.brass?.brand} ${row.brass?.model}`, 1);
+
+  if (!parts.length) return { roundsRemaining: null, bottleneck: null };
+  const min = parts.reduce((a, b) => (b.rounds < a.rounds ? b : a));
+  return { roundsRemaining: min.rounds, bottleneck: min.label };
+}
+
 function mapRecipeRow(row, session, shots, inventory) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
   return {
@@ -106,6 +135,7 @@ function mapRecipeRow(row, session, shots, inventory) {
     extremeSpread: session?.extreme_spread_fps ?? null,
     targetImageUrl: session?.target_image_url ?? null,
     costPerRound: calculateCostPerRound(row, inventory),
+    ...calculateRoundsRemaining(row, inventory),
     shots: shots ?? [],
   };
 }

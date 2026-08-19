@@ -216,7 +216,9 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           <p className="mb-3 text-xs text-slate-400">
             How many rounds did you actually fire today? This can be different from the number of
             chrono'd shots above — include sighters, warm-ups, or anything you didn't log a
-            velocity for.
+            velocity for. Powder/bullets/primers get subtracted from your on-hand stock; brass
+            instead logs firings against its estimated reload-cycle count, since you keep the
+            cases to reload.
           </p>
           <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2">
@@ -246,19 +248,37 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
           {deductEnabled && deductionPreview.length > 0 && (
             <div className="mt-3 flex flex-col gap-1 border-t border-slate-800 pt-3">
-              {deductionPreview.map((line) => (
-                <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
-                  <span className="text-slate-200">{line.label}</span>: −{line.totalAmount} {line.unitLabel}
-                  {line.tracked ? (
-                    <>
-                      {' '}
-                      ({line.currentQty} → {Number(line.newQty.toFixed(2))} {line.unitLabel})
-                    </>
-                  ) : (
-                    <span className="text-slate-600"> — not tracked in your inventory, skipped</span>
-                  )}
-                </p>
-              ))}
+              {deductionPreview.map((line) =>
+                line.kind === 'cycles' ? (
+                  <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
+                    <span className="text-slate-200">{line.label}</span> (brass): +{line.totalAmount} firings
+                    {line.tracked ? (
+                      <>
+                        {' '}
+                        ({line.currentCycles} → {line.newCycles}
+                        {line.maxCycles != null ? ` of ~${line.maxCycles} est. cycles` : ''})
+                        {line.nearingRetirement && (
+                          <span className="text-amber-400"> — nearing estimated max, consider inspecting/retiring this batch</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-slate-600"> — not tracked in your inventory, skipped</span>
+                    )}
+                  </p>
+                ) : (
+                  <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
+                    <span className="text-slate-200">{line.label}</span>: −{line.totalAmount} {line.unitLabel}
+                    {line.tracked ? (
+                      <>
+                        {' '}
+                        ({line.currentQty} → {Number(line.newQty.toFixed(2))} {line.unitLabel})
+                      </>
+                    ) : (
+                      <span className="text-slate-600"> — not tracked in your inventory, skipped</span>
+                    )}
+                  </p>
+                )
+              )}
             </div>
           )}
 

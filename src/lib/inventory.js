@@ -76,9 +76,10 @@ export async function addInventoryEntry(userId, fields) {
   return data;
 }
 
-/** Update an existing row's editable fields (price/qty/reload cycles) by
- * its own id — component/custom identity isn't editable once created;
- * delete and re-add instead. */
+/** Update an existing row's editable fields (price/qty/reload cycles/
+ * cycles used) by its own id — component/custom identity isn't editable
+ * once created; delete and re-add instead. `cyclesUsed` is only
+ * meaningful for brass but harmless to send as null for other types. */
 export async function updateInventoryEntry(rowId, fields) {
   const { data, error } = await supabase
     .from('user_inventory')
@@ -87,6 +88,7 @@ export async function updateInventoryEntry(rowId, fields) {
       package_qty: fields.packageQty,
       quantity_on_hand: fields.quantityOnHand ?? null,
       reload_cycles: fields.reloadCycles ?? null,
+      cycles_used: fields.cyclesUsed ?? 0,
       notes: fields.notes || null,
       updated_at: new Date().toISOString(),
     })
@@ -103,6 +105,30 @@ export async function deleteInventoryEntry(rowId) {
   if (error) throw error;
 }
 
+// --- Low stock / brass retirement flags --------------------------------
+
+/** A row counts as "running low" once what's on hand drops under this
+ * fraction of a full package — e.g. under 20% of however much you
+ * normally buy at once. Deliberately relative rather than a fixed number,
+ * since "low" means something very different for a box of 100 primers vs.
+ * an 8lb jug of powder. Applies to Qty On Hand for every type, including
+ * brass (case count) — separate from cycles_used/reload_cycles below,
+ * which is about a batch of brass wearing out, not how many cases you
+ * own. */
+export const LOW_STOCK_RATIO = 0.2;
+
+export function isLowStock(row) {
+  if (row.quantity_on_hand == null || !row.package_qty) return false;
+  return row.quantity_on_hand < row.package_qty * LOW_STOCK_RATIO;
+}
+
+/** Brass only: true once a batch has been fired at least as many times as
+ * its own estimated reload_cycles ceiling — a signal to inspect/retire
+ * those cases, not a hard cutoff. */
+export function isBrassNearingRetirement(row) {
+  return row.reload_cycles != null && row.cycles_used != null && row.cycles_used >= row.reload_cycles;
+}
+
 // --- Automated deduction on Save to Vault -----------------------------
 //
 // Range-day shot counts are inherently a little fuzzy (sighters, warm-up
@@ -113,6 +139,13 @@ export async function deleteInventoryEntry(rowId) {
 // computeSessionDeduction (pure, for the preview) and
 // applySessionDeduction (the actual write) below, both used from
 // Dashboard's Save to Vault flow.
+//
+// Brass is handled differently from powder/bullet/primer: firing a round
+// doesn't reduce how many cases you physically own (you pick them back up
+// to reload), so deduction doesn't touch a brass row's Qty On Hand at
+// all — instead it increments a `cycles_used` counter, compared against
+// that row's own `reload_cycles` estimate to flag a batch nearing
+// retirement (see isBrassNearingRetirement above).
 
 export const GRAINS_PER_LB = 7000;
 
@@ -122,22 +155,24 @@ export const GRAINS_PER_LB = 7000;
  * primerLabel, brassId, brassLabel } (see mapRecipeRow in recipes.js).
  * `inventoryMap` is from fetchUserInventoryMap (component_id -> row).
  * Returns one line per component slot that's actually filled in on the
- * recipe; `tracked: false` means that component either isn't in the
- * user's inventory at all or has no Qty On Hand set, so there's nothing
- * to subtract from — those lines still show in the preview (so it's
- * obvious nothing will happen for them) but are skipped by
- * applySessionDeduction. */
+ * recipe. Powder/bullet/primer lines have `kind: 'consume'`; the brass
+ * line (if any) has `kind: 'cycles'` and different fields (see below).
+ * `tracked: false` means there's nothing to write for that line (no
+ * inventory row at all, or — for consume lines only — no Qty On Hand
+ * set) — those lines still show in the preview so it's obvious nothing
+ * will happen for them, but are skipped by applySessionDeduction. */
 export function computeSessionDeduction(recipeComponents, inventoryMap, roundsFired) {
   const rounds = Number(roundsFired);
   if (!Number.isFinite(rounds) || rounds <= 0) return [];
 
   const lines = [];
-  const pushLine = (componentId, label, type, perRoundAmount, unitLabel) => {
+
+  const pushConsumeLine = (componentId, label, type, perRoundAmount, unitLabel) => {
     if (!componentId) return;
     const totalAmount = perRoundAmount * rounds;
     const entry = inventoryMap?.[componentId];
     if (!entry || entry.quantity_on_hand == null) {
-      lines.push({ componentId, label, type, totalAmount, unitLabel, tracked: false });
+      lines.push({ componentId, label, type, totalAmount, unitLabel, tracked: false, kind: 'consume' });
       return;
     }
     const newQty = Math.max(0, entry.quantity_on_hand - totalAmount);
@@ -149,15 +184,42 @@ export function computeSessionDeduction(recipeComponents, inventoryMap, roundsFi
       totalAmount,
       unitLabel,
       tracked: true,
+      kind: 'consume',
       currentQty: entry.quantity_on_hand,
       newQty,
     });
   };
 
-  pushLine(recipeComponents.powderId, recipeComponents.powderLabel, 'powder', recipeComponents.chargeGrains ?? 0, 'grains');
-  pushLine(recipeComponents.bulletId, recipeComponents.bulletLabel, 'bullet', 1, 'count');
-  pushLine(recipeComponents.primerId, recipeComponents.primerLabel, 'primer', 1, 'count');
-  pushLine(recipeComponents.brassId, recipeComponents.brassLabel, 'brass', 1, 'count');
+  const pushBrassCycleLine = (componentId, label) => {
+    if (!componentId) return;
+    const entry = inventoryMap?.[componentId];
+    if (!entry) {
+      lines.push({ componentId, label, type: 'brass', totalAmount: rounds, unitLabel: 'firings', tracked: false, kind: 'cycles' });
+      return;
+    }
+    const currentCycles = entry.cycles_used ?? 0;
+    const newCycles = currentCycles + rounds;
+    lines.push({
+      componentId,
+      rowId: entry.id,
+      label,
+      type: 'brass',
+      totalAmount: rounds,
+      unitLabel: 'firings',
+      tracked: true,
+      kind: 'cycles',
+      currentCycles,
+      newCycles,
+      maxCycles: entry.reload_cycles ?? null,
+      nearingRetirement: entry.reload_cycles != null && newCycles >= entry.reload_cycles,
+    });
+  };
+
+  pushConsumeLine(recipeComponents.powderId, recipeComponents.powderLabel, 'powder', recipeComponents.chargeGrains ?? 0, 'grains');
+  pushConsumeLine(recipeComponents.bulletId, recipeComponents.bulletLabel, 'bullet', 1, 'count');
+  pushConsumeLine(recipeComponents.primerId, recipeComponents.primerLabel, 'primer', 1, 'count');
+  pushBrassCycleLine(recipeComponents.brassId, recipeComponents.brassLabel);
+
   return lines;
 }
 
@@ -169,13 +231,13 @@ export function computeSessionDeduction(recipeComponents, inventoryMap, roundsFi
 export async function applySessionDeduction(userId, lines) {
   const trackedLines = (lines || []).filter((l) => l.tracked);
   const results = await Promise.allSettled(
-    trackedLines.map((line) =>
-      supabase
-        .from('user_inventory')
-        .update({ quantity_on_hand: line.newQty, updated_at: new Date().toISOString() })
-        .eq('id', line.rowId)
-        .eq('user_id', userId)
-    )
+    trackedLines.map((line) => {
+      const update =
+        line.kind === 'cycles'
+          ? { cycles_used: line.newCycles, updated_at: new Date().toISOString() }
+          : { quantity_on_hand: line.newQty, updated_at: new Date().toISOString() };
+      return supabase.from('user_inventory').update(update).eq('id', line.rowId).eq('user_id', userId);
+    })
   );
   const failed = results.filter((r) => r.status === 'rejected' || r.value?.error);
   if (failed.length) {
