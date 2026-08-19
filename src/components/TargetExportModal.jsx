@@ -28,6 +28,25 @@ function truncateText(ctx, text, maxWidth) {
   return `${truncated}…`;
 }
 
+/** Draws a "Label: Value" line where the label (e.g. "Powder:") is dim
+ * amber and the value (e.g. "Hodgon H4350") is bold and bright — so the
+ * component names are actually legible/scannable at social-post size
+ * instead of everything running together in one flat grey line. Drawn as
+ * two separate fillText calls sharing a baseline, since canvas has no
+ * mixed-style text run. The value is truncated against whatever width is
+ * left after the label, so long component names still can't run past
+ * `maxWidth`. */
+function drawLabeledLine(ctx, label, value, x, y, maxWidth) {
+  ctx.font = '18px monospace';
+  ctx.fillStyle = '#d97706';
+  ctx.fillText(label, x, y);
+  const labelWidth = ctx.measureText(label).width;
+
+  ctx.font = 'bold 18px monospace';
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillText(truncateText(ctx, value, maxWidth - labelWidth), x + labelWidth, y);
+}
+
 export default function TargetExportModal({
   open,
   onClose,
@@ -190,25 +209,26 @@ export default function TargetExportModal({
       ctx.font = '20px monospace';
       ctx.fillText(truncateText(ctx, recipe.caliber, loadMaxWidth), loadX, footerTop + 52);
 
-      // Labeled component lines, not just bare values — "Hodgon H4350" on
-      // its own doesn't say whether that's the powder or the bullet.
-      // Powder/Bullet on their own lines (charge weight folded into the
-      // Powder line, since it's meaningless without knowing which powder
-      // it's a charge OF); Primer/Brass share a line since both tend to
-      // be short.
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '18px monospace';
-      const powderLine = `Powder: ${recipe.chargeGrains ?? '—'}gr ${recipe.powder || '—'}`;
-      ctx.fillText(truncateText(ctx, powderLine, loadMaxWidth), loadX, footerTop + 74);
-
-      const bulletLine = `Bullet: ${recipe.bullet || '—'}`;
-      ctx.fillText(truncateText(ctx, bulletLine, loadMaxWidth), loadX, footerTop + 96);
-
-      const primerBrassLine = `Primer: ${recipe.primer || '—'}  Brass: ${recipe.brass || '—'}`;
-      ctx.fillText(truncateText(ctx, primerBrassLine, loadMaxWidth), loadX, footerTop + 118);
+      // Labeled component lines, one per line, not just bare values —
+      // "Hodgon H4350" on its own doesn't say whether that's the powder
+      // or the bullet. Charge weight folds into the Powder line since
+      // it's meaningless without knowing which powder it's a charge OF.
+      drawLabeledLine(
+        ctx,
+        'Powder: ',
+        `${recipe.chargeGrains ?? '—'}gr ${recipe.powder || '—'}`,
+        loadX,
+        footerTop + 74,
+        loadMaxWidth
+      );
+      drawLabeledLine(ctx, 'Bullet: ', recipe.bullet || '—', loadX, footerTop + 96, loadMaxWidth);
+      drawLabeledLine(ctx, 'Primer: ', recipe.primer || '—', loadX, footerTop + 118, loadMaxWidth);
+      drawLabeledLine(ctx, 'Brass: ', recipe.brass || '—', loadX, footerTop + 140, loadMaxWidth);
 
       if (recipe.coalInches) {
-        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 140);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '18px monospace';
+        ctx.fillText(`COAL ${recipe.coalInches}"`, loadX, footerTop + 162);
       }
     }
     if (qrImgRef.current) {
