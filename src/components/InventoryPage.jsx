@@ -10,7 +10,7 @@ import {
   isLowStock,
   updateInventoryEntry,
 } from '../lib/inventory.js';
-import { fetchCalibers } from '../lib/recipes.js';
+import { fetchCalibers, fetchCurrentlyLoadedByBrassCaliber } from '../lib/recipes.js';
 
 // Powder is bought by the pound but metered out by the grain (matching a
 // recipe's charge_weight_grains), so its section tracks Container Weight
@@ -118,6 +118,7 @@ function formatCostPerUnit(unitCost, packageQty, isPowder) {
 export default function InventoryPage({ authUser }) {
   const [components, setComponents] = useState([]);
   const [calibers, setCalibers] = useState([]);
+  const [currentlyLoadedMap, setCurrentlyLoadedMap] = useState({});
   const [rows, setRows] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
@@ -135,11 +136,17 @@ export default function InventoryPage({ authUser }) {
     }
     setLoading(true);
     setError('');
-    Promise.all([fetchAllComponents(), fetchUserInventoryRows(authUser.id), fetchCalibers()])
-      .then(([comps, invRows, cals]) => {
+    Promise.all([
+      fetchAllComponents(),
+      fetchUserInventoryRows(authUser.id),
+      fetchCalibers(),
+      fetchCurrentlyLoadedByBrassCaliber(authUser.id),
+    ])
+      .then(([comps, invRows, cals, loadedMap]) => {
         setComponents(comps);
         setRows(invRows);
         setCalibers(cals);
+        setCurrentlyLoadedMap(loadedMap);
         const nextDrafts = {};
         invRows.forEach((row) => {
           const isPowder = (row.component?.type ?? row.custom_type) === 'powder';
@@ -159,6 +166,43 @@ export default function InventoryPage({ authUser }) {
     });
     return byType;
   }, [rows]);
+
+  // "Currently loaded" is only known pooled per (brass component, caliber)
+  // — see fetchCurrentlyLoadedByBrassCaliber — not per individual lot, so
+  // it has to be split across a caliber's lots for display rather than
+  // just subtracted from each lot's own Qty On Hand independently (that
+  // would double-count: two 500-case lots with 50 loaded would each show
+  // "450 available," implying 900 available when the real total is 950).
+  // Split it the same way actual deduction would have drawn it down —
+  // oldest lot first (rows are already fetched oldest-first) — so the
+  // numbers stay consistent across rows. If more turns out to be loaded
+  // than there are cases on record for that caliber (e.g. Qty On Hand got
+  // edited down after the fact, or a lot that was drawn from got
+  // deleted), the leftover is surfaced as a warning on the last lot
+  // rather than silently hidden.
+  const brassAllocationByRowId = useMemo(() => {
+    const result = {};
+    const groups = {};
+    rowsByType.brass.forEach((row) => {
+      if (!row.component_id || !row.caliber_id) return; // untagged/custom lots: nothing to match against
+      const key = `${row.component_id}::${row.caliber_id}`;
+      (groups[key] ??= []).push(row);
+    });
+    Object.entries(groups).forEach(([key, groupRows]) => {
+      let remaining = currentlyLoadedMap[key] || 0;
+      groupRows.forEach((row) => {
+        const owned = row.quantity_on_hand ?? 0;
+        const take = Math.min(remaining, owned);
+        remaining -= take;
+        result[row.id] = { currentlyLoaded: take, availableToLoad: Math.max(0, owned - take) };
+      });
+      if (remaining > 0) {
+        const lastRow = groupRows[groupRows.length - 1];
+        result[lastRow.id].exceedsOnHand = remaining;
+      }
+    });
+    return result;
+  }, [rowsByType.brass, currentlyLoadedMap]);
 
   // Every catalog component of each type is always offered in the "add a
   // row" dropdown, even ones you've already added — a component can have
@@ -417,6 +461,19 @@ export default function InventoryPage({ authUser }) {
                               <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-[10px] text-amber-400">
                                 <AlertTriangle size={10} />
                                 Running low
+                              </p>
+                            )}
+                            {type === 'brass' && brassAllocationByRowId[row.id]?.currentlyLoaded > 0 && (
+                              <p className="mt-1 whitespace-nowrap text-[10px] text-slate-500">
+                                {brassAllocationByRowId[row.id].availableToLoad} available to load (
+                                {brassAllocationByRowId[row.id].currentlyLoaded} currently loaded)
+                              </p>
+                            )}
+                            {type === 'brass' && brassAllocationByRowId[row.id]?.exceedsOnHand > 0 && (
+                              <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-[10px] text-amber-400">
+                                <AlertTriangle size={10} />
+                                {brassAllocationByRowId[row.id].exceedsOnHand} more loaded than cases on
+                                record for this caliber
                               </p>
                             )}
                           </td>

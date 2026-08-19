@@ -143,6 +143,56 @@ export async function fetchRoundsOnHand(recipeId) {
   return Math.max(0, totalLoaded - totalFired);
 }
 
+/** Same idea as fetchRoundsOnHand above, but aggregated across every
+ * recipe that shares a given brass component + caliber, instead of one
+ * recipe at a time — this is what lets the Inventory page show "N cases
+ * currently loaded and not yet fired" for a brass lot, without needing to
+ * record which specific lot every Loading Session actually drew from
+ * (see the caveat about caliber-level, not lot-level, tracking discussed
+ * with the user). Returns a map of `${brassComponentId}::${caliberId} ->
+ * currently-loaded count (only keys with a nonzero count are included).
+ *
+ * Deliberately does NOT filter out archived recipes: archiving a recipe
+ * just hides it from the recipe switcher, it doesn't mean any ammo
+ * already loaded under it stopped existing or stopped tying up brass —
+ * excluding archived recipes here would silently understate how much is
+ * actually loaded. */
+export async function fetchCurrentlyLoadedByBrassCaliber(userId) {
+  const { data: recipes, error: recipeError } = await supabase
+    .from('load_recipes')
+    .select('id, brass_id, caliber_id')
+    .eq('user_id', userId)
+    .not('brass_id', 'is', null);
+  if (recipeError) throw recipeError;
+  if (!recipes || !recipes.length) return {};
+
+  const recipeIds = recipes.map((r) => r.id);
+  const [{ data: batches, error: batchError }, { data: sessions, error: sessionError }] = await Promise.all([
+    supabase.from('load_batches').select('recipe_id, rounds_loaded').in('recipe_id', recipeIds),
+    supabase.from('range_sessions').select('recipe_id, rounds_fired').in('recipe_id', recipeIds),
+  ]);
+  if (batchError) throw batchError;
+  if (sessionError) throw sessionError;
+
+  const loadedByRecipe = {};
+  (batches || []).forEach((b) => {
+    loadedByRecipe[b.recipe_id] = (loadedByRecipe[b.recipe_id] || 0) + (b.rounds_loaded || 0);
+  });
+  const firedByRecipe = {};
+  (sessions || []).forEach((s) => {
+    firedByRecipe[s.recipe_id] = (firedByRecipe[s.recipe_id] || 0) + (s.rounds_fired || 0);
+  });
+
+  const byKey = {};
+  recipes.forEach((r) => {
+    const onHand = Math.max(0, (loadedByRecipe[r.id] || 0) - (firedByRecipe[r.id] || 0));
+    if (!onHand) return;
+    const key = `${r.brass_id}::${r.caliber_id}`;
+    byKey[key] = (byKey[key] || 0) + onHand;
+  });
+  return byKey;
+}
+
 /** Log a Loading Session — a batch of `roundsLoaded` rounds of this
  * recipe actually assembled at the bench. This is what should trigger
  * component deduction (see computeBatchDeduction/applyBatchDeduction in
