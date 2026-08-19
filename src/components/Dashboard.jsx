@@ -493,10 +493,10 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
                         <span className="flex items-center">
                           Velocity Trend
                           <InfoTooltip>
-                            "This Session" is per-shot velocity from the most recent chrono log, in shot order — the
-                            shaded band is ±1 SD, and red dots are flyers (outside ±2 SD). "History" is average
+                            "Session" is per-shot velocity from the most recent chrono log, in shot order — the dashed
+                            line is the session average, and red dots are flyers (outside ±2 SD). "History" is average
                             velocity per Range Session over this recipe's life, showing real drift from barrel wear or
-                            a powder lot change.
+                            a powder lot change. Tap any point on either chart for its exact value.
                           </InfoTooltip>
                         </span>
                         <div className="flex gap-1 normal-case">
