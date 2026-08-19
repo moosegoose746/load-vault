@@ -8,9 +8,17 @@ const PLOT_H = HEIGHT - MARGIN.top - MARGIN.bottom;
 
 const AMBER = '#fbbf24';
 const AMBER_DIM = 'rgba(251, 191, 36, 0.35)';
+const RED = '#f87171';
+const RED_DIM = 'rgba(248, 113, 113, 0.45)';
 const MUTED = '#64748b';
 const GRID = '#1e293b';
 const SURFACE = '#0f172a';
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
 /** "Nice" axis tick step — snaps to a 1/2/5×10^n step so the y-axis reads
  * in round numbers (per the dataviz skill's marks-and-anatomy guidance),
@@ -137,6 +145,17 @@ export default function WorkupChart({ rungs }) {
   const fit =
     usable.length >= 2 ? linearRegression(usable.map((r) => ({ x: r.chargeGrains, y: r.avgVelocity }))) : null;
 
+  // "Erratic" flag — a rung whose SD is notably higher (>1.5×) than the
+  // median SD across this ladder's other rungs. Purely a statistical
+  // comparison within the ladder, not a claim about pressure signs or
+  // where the useful node is — deliberately more conservative than that
+  // (see the component doc comment). Needs at least 3 rungs with SD data
+  // for "median" to mean anything.
+  const sdValues = usable.map((r) => r.stdDevFps).filter((v) => v != null);
+  const sdMedian = sdValues.length >= 3 ? median(sdValues) : null;
+  const isErratic = (r) => sdMedian != null && r.stdDevFps != null && r.stdDevFps > sdMedian * 1.5;
+  const anyErratic = usable.some(isErratic);
+
   const active = activeId != null ? usable.find((r) => r.id === activeId) : null;
 
   return (
@@ -175,41 +194,62 @@ export default function WorkupChart({ rungs }) {
         {/* Fitted trend line — a computed reference, not raw data, so it
             stays in the recessive gray/dashed treatment (same convention
             as the sparkline's average line) rather than the amber data
-            color. */}
+            color. Labeled in the caption below the chart instead of
+            in-line — an in-chart text label here would collide with a
+            real data point for almost any small ladder, since the line
+            necessarily ends right at one. */}
         {fit && (
-          <>
-            <line
-              x1={toX(chargeMin)}
-              y1={toY(fit.slope * chargeMin + fit.intercept)}
-              x2={toX(chargeMax)}
-              y2={toY(fit.slope * chargeMax + fit.intercept)}
-              stroke={MUTED}
-              strokeWidth="1.5"
-              strokeDasharray="4,3"
-            />
-            <text x={toX(chargeMax) - 4} y={toY(fit.slope * chargeMax + fit.intercept) - 6} fontSize="8" fill={MUTED} textAnchor="end">
-              trend
-            </text>
-          </>
+          <line
+            x1={toX(chargeMin)}
+            y1={toY(fit.slope * chargeMin + fit.intercept)}
+            x2={toX(chargeMax)}
+            y2={toY(fit.slope * chargeMax + fit.intercept)}
+            stroke={MUTED}
+            strokeWidth="1.5"
+            strokeDasharray="4,3"
+          />
         )}
+
+        {/* Spread whiskers — min-to-max shot range per rung, drawn behind
+            the dots. Lets the MAGNITUDE of a rung's spread read at a
+            glance without counting individual dots; an "erratic" rung
+            (SD notably above this ladder's median) renders in red instead
+            of the default muted gray. */}
+        {usable.map((r) => {
+          if (r.shots.length < 2) return null;
+          const x = toX(r.chargeGrains);
+          const yMinV = toY(Math.min(...r.shots));
+          const yMaxV = toY(Math.max(...r.shots));
+          const color = isErratic(r) ? RED : MUTED;
+          const opacity = isErratic(r) ? 0.6 : 0.35;
+          return (
+            <g key={`whisker-${r.id}`}>
+              <line x1={x} x2={x} y1={yMaxV} y2={yMinV} stroke={color} strokeWidth="1.5" opacity={opacity} />
+              <line x1={x - 4} x2={x + 4} y1={yMaxV} y2={yMaxV} stroke={color} strokeWidth="1.5" opacity={opacity} />
+              <line x1={x - 4} x2={x + 4} y1={yMinV} y2={yMinV} stroke={color} strokeWidth="1.5" opacity={opacity} />
+            </g>
+          );
+        })}
 
         {/* Individual shots — small, dim, non-interactive context so a
             lone weird reading is visible as spread rather than hidden
             inside an average. */}
-        {usable.flatMap((r) =>
-          r.shots.map((v, i) => <circle key={`${r.id}-${i}`} cx={toX(r.chargeGrains)} cy={toY(v)} r="2.5" fill={AMBER_DIM} />)
-        )}
+        {usable.flatMap((r) => {
+          const dotColor = isErratic(r) ? RED_DIM : AMBER_DIM;
+          return r.shots.map((v, i) => <circle key={`${r.id}-${i}`} cx={toX(r.chargeGrains)} cy={toY(v)} r="2.5" fill={dotColor} />);
+        })}
 
         {/* Rung averages — the primary, bold, tappable mark. */}
         {usable.map((r) => {
           const isActive = activeId === r.id;
+          const erratic = isErratic(r);
           return (
             <g key={r.id}>
               <circle
                 cx={toX(r.chargeGrains)}
                 cy={toY(r.avgVelocity)}
                 r={isActive ? 6 : 5}
-                fill={AMBER}
+                fill={erratic ? RED : AMBER}
                 stroke={SURFACE}
                 strokeWidth={isActive ? 2.5 : 1.5}
               />
@@ -225,6 +265,28 @@ export default function WorkupChart({ rungs }) {
           );
         })}
       </svg>
+
+      {/* Caption/legend — outside the SVG so it never has to fight with
+          data marks for space, and can grow/wrap freely. Line keys, not
+          boxes, per the dataviz skill's tooltip/legend guidance. */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-slate-500">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full bg-amber-400" /> rung average (tap for detail)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400/40" /> individual shot
+        </span>
+        {fit && (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-px w-3 border-t border-dashed border-slate-500" /> fitted trend
+          </span>
+        )}
+        {anyErratic && (
+          <span className="flex items-center gap-1 text-red-400">
+            <span className="inline-block h-2 w-2 rounded-full bg-red-400" /> spread notably higher than this ladder's median
+          </span>
+        )}
+      </div>
 
       {active && (
         <Tooltip
