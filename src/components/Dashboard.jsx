@@ -5,12 +5,13 @@ import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
 import RecipeNotesCard from './RecipeNotesCard.jsx';
 import VelocitySparkline from './VelocitySparkline.jsx';
+import TargetHistoryModal from './TargetHistoryModal.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
 import ChronoImport from './ChronoImport.jsx';
 import InfoTooltip from './InfoTooltip.jsx';
 import { useSync } from '../context/SyncContext.jsx';
-import { createLoadBatch, createRangeSession } from '../lib/recipes.js';
+import { createLoadBatch, createRangeSession, fetchVelocityTrend, fetchTargetHistory } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
 import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
 import { fetchUserFirearms, fetchRoundsFiredByFirearm } from '../lib/firearms.js';
@@ -84,6 +85,60 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   useEffect(() => {
     setNotesOverride(recipe.notes || '');
   }, [activeRecipeId, recipe.notes]);
+
+  // Velocity Trend card mode — 'shots' (this session, the default) vs.
+  // 'trend' (average velocity per session across the recipe's whole
+  // history). The trend data is a separate query (fetchVelocityTrend) so
+  // it's only fetched the first time a user actually switches to it,
+  // rather than loading on every Overview visit.
+  const [velocityMode, setVelocityMode] = useState('shots');
+  const [velocityTrend, setVelocityTrend] = useState(null);
+  const [velocityTrendLoading, setVelocityTrendLoading] = useState(false);
+
+  // Target History popup — fetched lazily when the Last Target card is
+  // clicked, same reasoning as velocity trend above.
+  const [targetHistoryOpen, setTargetHistoryOpen] = useState(false);
+  const [targetHistory, setTargetHistory] = useState(null);
+  const [targetHistoryLoading, setTargetHistoryLoading] = useState(false);
+
+  // Reset both lazy-loaded Overview extras whenever the active recipe
+  // changes, so switching recipes doesn't show stale trend/history data.
+  useEffect(() => {
+    setVelocityMode('shots');
+    setVelocityTrend(null);
+    setTargetHistoryOpen(false);
+    setTargetHistory(null);
+  }, [activeRecipeId]);
+
+  const handleVelocityModeChange = (mode) => {
+    setVelocityMode(mode);
+    if (mode === 'trend' && velocityTrend === null && isRealRecipe) {
+      setVelocityTrendLoading(true);
+      fetchVelocityTrend(activeRecipeId)
+        .then(setVelocityTrend)
+        .catch((err) => {
+          console.error('Failed to load velocity trend', err);
+          setVelocityTrend([]);
+        })
+        .finally(() => setVelocityTrendLoading(false));
+    }
+  };
+
+  const openTargetHistory = () => {
+    setTargetHistoryOpen(true);
+    if (targetHistory === null && isRealRecipe) {
+      setTargetHistoryLoading(true);
+      fetchTargetHistory(activeRecipeId)
+        .then(setTargetHistory)
+        .catch((err) => {
+          console.error('Failed to load target history', err);
+          setTargetHistory([]);
+        })
+        .finally(() => setTargetHistoryLoading(false));
+    }
+  };
+
+  const firearmsById = useMemo(() => Object.fromEntries(firearms.map((f) => [f.id, f])), [firearms]);
 
   // Loading Session state — logging a batch actually assembles ammo and
   // is what triggers component deduction (see computeBatchDeduction/
@@ -374,13 +429,19 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
                 </div>
               </div>
 
-              {(recipe.targetImageUrl || (displayShots && displayShots.length >= 2)) && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {recipe.targetImageUrl && (
-                    <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
-                      <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
-                        Last Target
-                        <InfoTooltip>The most recent saved target photo for this recipe, from Range Day.</InfoTooltip>
+                    <button
+                      type="button"
+                      onClick={openTargetHistory}
+                      className="rounded border border-slate-700 bg-slate-900/60 p-4 text-left transition-colors hover:border-amber-500/60"
+                    >
+                      <span className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
+                        <span className="flex items-center">
+                          Last Target
+                          <InfoTooltip>The most recent saved target photo for this recipe, from Range Day. Click to see the full target history.</InfoTooltip>
+                        </span>
+                        <span className="normal-case text-amber-400">View history →</span>
                       </span>
                       <div className="mt-2 flex items-center gap-3">
                         <img
@@ -392,22 +453,67 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
                           {recipe.groupSizeMoa != null ? `${recipe.groupSizeMoa.toFixed(2)} MOA` : '—'}
                         </span>
                       </div>
-                    </div>
+                    </button>
                   )}
 
-                  {displayShots && displayShots.length >= 2 && (
-                    <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
-                      <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
-                        Velocity Trend
-                        <InfoTooltip>Per-shot velocity from the most recent chrono log for this recipe, in shot order.</InfoTooltip>
-                      </span>
+                  <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                      <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
+                        <span className="flex items-center">
+                          Velocity Trend
+                          <InfoTooltip>
+                            "This Session" is per-shot velocity from the most recent chrono log, in shot order — the
+                            shaded band is ±1 SD, and red dots are flyers (outside ±2 SD). "History" is average
+                            velocity per Range Session over this recipe's life, showing real drift from barrel wear or
+                            a powder lot change.
+                          </InfoTooltip>
+                        </span>
+                        <div className="flex gap-1 normal-case">
+                          <button
+                            type="button"
+                            onClick={() => handleVelocityModeChange('shots')}
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              velocityMode === 'shots' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-500 hover:text-slate-300'
+                            }`}
+                          >
+                            Session
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleVelocityModeChange('trend')}
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              velocityMode === 'trend' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-500 hover:text-slate-300'
+                            }`}
+                          >
+                            History
+                          </button>
+                        </div>
+                      </div>
                       <div className="mt-2">
-                        <VelocitySparkline shots={displayShots} />
+                        {velocityMode === 'trend' ? (
+                          velocityTrendLoading ? (
+                            <p className="py-3 text-center text-[11px] text-slate-500">Loading history…</p>
+                          ) : velocityTrend && velocityTrend.length >= 2 ? (
+                            <VelocitySparkline mode="trend" trend={velocityTrend} />
+                          ) : (
+                            <p className="py-3 text-center text-[11px] text-slate-500">
+                              Need at least two Range Sessions with chrono data to show a trend.
+                            </p>
+                          )
+                        ) : displayShots && displayShots.length >= 2 ? (
+                          <VelocitySparkline
+                            mode="shots"
+                            shots={displayShots}
+                            avgVelocity={displayAvgVelocity}
+                            stdDevFps={displayStdDevFps}
+                          />
+                        ) : (
+                          <p className="py-3 text-center text-[11px] text-slate-500">
+                            No chrono data logged for this recipe yet.
+                          </p>
+                        )}
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
+              </div>
 
               <RecipeNotesCard
                 recipeId={activeRecipeId}
@@ -641,6 +747,14 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         avgVelocity={displayAvgVelocity}
         stdDevFps={displayStdDevFps}
         extremeSpread={displayExtremeSpread}
+      />
+
+      <TargetHistoryModal
+        open={targetHistoryOpen}
+        onClose={() => setTargetHistoryOpen(false)}
+        history={targetHistory}
+        loading={targetHistoryLoading}
+        firearmsById={firearmsById}
       />
     </main>
   );

@@ -268,7 +268,7 @@ function FirearmFormModal({ open, firearm, calibers, authUser, onClose, onSaved 
 // which recipes have been fired through it). Fetched lazily on open
 // rather than up front for every card on the page, since it's a couple
 // of extra queries per firearm that most visits to this page won't need.
-function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEdit }) {
+function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEdit, onSelectRecipe }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -385,12 +385,26 @@ function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEd
               Recipes Fired Through This Firearm
             </h3>
             <div className="flex flex-col gap-1">
-              {stats.recipesUsed.map((r) => (
-                <div key={r.title} className="flex items-center justify-between text-xs text-slate-400">
-                  <span className="truncate">{r.title}</span>
-                  <span className="font-mono text-slate-300">{r.rounds} rounds</span>
-                </div>
-              ))}
+              {stats.recipesUsed.map((r) =>
+                onSelectRecipe ? (
+                  <button
+                    key={r.recipeId}
+                    type="button"
+                    onClick={() => onSelectRecipe(r.recipeId)}
+                    className="flex items-center justify-between text-left text-xs text-slate-400 hover:text-amber-400"
+                  >
+                    <span className="truncate underline decoration-slate-700 underline-offset-2 hover:decoration-amber-400">
+                      {r.title}
+                    </span>
+                    <span className="font-mono text-slate-300">{r.rounds} rounds</span>
+                  </button>
+                ) : (
+                  <div key={r.recipeId} className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="truncate">{r.title}</span>
+                    <span className="font-mono text-slate-300">{r.rounds} rounds</span>
+                  </div>
+                )
+              )}
             </div>
           </div>
         )}
@@ -543,7 +557,7 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onOpen, onEdit, onDelete }
 // supabase/schema_firearms.sql and lib/firearms.js for the full design).
 // Firearm is picked per Range Session on Dashboard, not here — this page
 // is just for creating/viewing/editing the profiles themselves.
-export default function FirearmsPage({ authUser }) {
+export default function FirearmsPage({ authUser, onSelectRecipe }) {
   const [firearms, setFirearms] = useState([]);
   const [roundsFiredByFirearm, setRoundsFiredByFirearm] = useState({});
   const [calibers, setCalibers] = useState([]);
@@ -660,6 +674,14 @@ export default function FirearmsPage({ authUser }) {
           setEditingFirearm(f);
           setFormOpen(true);
         }}
+        onSelectRecipe={
+          onSelectRecipe
+            ? (recipeId) => {
+                setViewingFirearm(null);
+                onSelectRecipe(recipeId);
+              }
+            : undefined
+        }
       />
 
       <FirearmFormModal

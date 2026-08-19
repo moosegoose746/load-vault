@@ -224,7 +224,13 @@ function AppShell() {
         view === 'inventory' ? (
           <InventoryPage authUser={auth.user} />
         ) : view === 'firearms' ? (
-          <FirearmsPage authUser={auth.user} />
+          <FirearmsPage
+            authUser={auth.user}
+            onSelectRecipe={(recipeId) => {
+              setActiveRecipeId(recipeId);
+              setView('vault');
+            }}
+          />
         ) : (
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar

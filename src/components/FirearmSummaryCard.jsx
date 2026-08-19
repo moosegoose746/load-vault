@@ -1,19 +1,19 @@
-import { Crosshair } from 'lucide-react';
+import { Camera } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
 import { totalRoundsForFirearm, barrelLifePercentUsed } from '../lib/firearms.js';
 
 /** Compact read-only firearm card for the Recipe Overview tab — replaces
  * the old RecipeChecklist's single plain-text "Firearm" row with the
- * actual Firearm Profile (name, caliber, round count, barrel life if
- * tracked), so a user looking at a recipe can see at a glance which gun
- * it's built for without switching tabs. `firearm` is one entry from
- * Dashboard's already-fetched `firearms` list (found via
- * firearms.find(f => f.id === recipe.firearmId)) — deliberately not a new
- * fetch. `roundsFiredByFirearm` is the userId -> firearmId -> count map
- * from fetchRoundsFiredByFirearm, passed straight through so this card can
- * reuse the same totalRoundsForFirearm/barrelLifePercentUsed helpers the
- * Firearms page itself uses (see lib/firearms.js), rather than
- * re-deriving the math. */
+ * actual Firearm Profile (photo, make/model, optic, barrel specs, round
+ * count, barrel life if tracked), so a user looking at a recipe can see
+ * at a glance which gun it's built for without switching tabs. `firearm`
+ * is one entry from Dashboard's already-fetched `firearms` list (found
+ * via firearms.find(f => f.id === recipe.firearmId)) — deliberately not
+ * a new fetch. `roundsFiredByFirearm` is the userId -> firearmId -> count
+ * map from fetchRoundsFiredByFirearm, passed straight through so this
+ * card can reuse the same totalRoundsForFirearm/barrelLifePercentUsed
+ * helpers the Firearms page itself uses (see lib/firearms.js), rather
+ * than re-deriving the math. */
 export default function FirearmSummaryCard({ firearm, roundsFiredByFirearm }) {
   if (!firearm) {
     return (
@@ -25,18 +25,29 @@ export default function FirearmSummaryCard({ firearm, roundsFiredByFirearm }) {
 
   const totalRounds = totalRoundsForFirearm(firearm, roundsFiredByFirearm);
   const pct = barrelLifePercentUsed(firearm, totalRounds);
+  const detailLine = [firearm.make, firearm.model].filter(Boolean).join(' ');
+  const barrelLine = [
+    firearm.barrel_length_inches ? `${firearm.barrel_length_inches}" barrel` : null,
+    firearm.twist_rate ? `${firearm.twist_rate} twist` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
-      <div className="flex items-center gap-2">
-        <Crosshair size={16} className="shrink-0 text-amber-400" />
-        <div>
-          <div className="text-sm font-semibold text-slate-100">{firearm.name}</div>
-          {(firearm.make || firearm.model) && (
-            <div className="text-xs text-slate-500">
-              {[firearm.make, firearm.model].filter(Boolean).join(' ')}
-            </div>
+      <div className="flex items-start gap-3">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-900">
+          {firearm.photo_url ? (
+            <img src={firearm.photo_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <Camera size={18} className="text-slate-600" />
           )}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-slate-100">{firearm.name}</div>
+          {detailLine && <div className="truncate text-xs text-slate-500">{detailLine}</div>}
+          {firearm.optic && <div className="truncate text-[11px] text-slate-500">{firearm.optic}</div>}
+          {barrelLine && <div className="truncate text-[11px] text-slate-500">{barrelLine}</div>}
         </div>
       </div>
 

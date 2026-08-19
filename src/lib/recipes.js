@@ -225,6 +225,48 @@ async function fetchLastLoadingBatch(recipeId) {
   return data?.[0] ?? null;
 }
 
+/** Average velocity per Range Session for this recipe, oldest first — the
+ * "session-over-session" trend, as opposed to the per-shot trend within
+ * one session (see displayShots/VelocitySparkline in Dashboard.jsx). This
+ * is what actually shows a load drifting (barrel wear, powder lot change)
+ * over the recipe's life, which a single session's shot-to-shot noise
+ * can't. Sessions with no avg_velocity_fps recorded (no chrono data that
+ * day) are skipped rather than plotted as a gap or zero. Fetched lazily —
+ * only when the Overview tab's Velocity Trend card is switched to
+ * "Trend" mode — since it's a separate query from the single latest
+ * session fetchRecipeDetail already pulls. */
+export async function fetchVelocityTrend(recipeId) {
+  const { data, error } = await supabase
+    .from('range_sessions')
+    .select('avg_velocity_fps, created_at')
+    .eq('recipe_id', recipeId)
+    .not('avg_velocity_fps', 'is', null)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((s) => ({ avgVelocity: s.avg_velocity_fps, date: s.created_at }));
+}
+
+/** Every Range Session for this recipe that has a saved target photo,
+ * newest first, with the full per-session context (distance, group size,
+ * velocity stats, rounds fired, which firearm) — powers the Overview
+ * tab's target history popup (see TargetHistoryModal.jsx). Fetched lazily
+ * on open, same reasoning as fetchVelocityTrend above: fetchRecipeDetail
+ * only ever pulls the single latest session, so a full photo history
+ * needs its own query rather than bloating every recipe load with data
+ * most views never show. */
+export async function fetchTargetHistory(recipeId) {
+  const { data, error } = await supabase
+    .from('range_sessions')
+    .select(
+      'id, target_image_url, created_at, distance_yards, group_size_moa, group_size_inches, avg_velocity_fps, std_dev_fps, extreme_spread_fps, rounds_fired, firearm_id'
+    )
+    .eq('recipe_id', recipeId)
+    .not('target_image_url', 'is', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 /** Log a Loading Session — a batch of `roundsLoaded` rounds of this
  * recipe actually assembled at the bench. This is what should trigger
  * component deduction (see computeBatchDeduction/applyBatchDeduction in

@@ -90,15 +90,16 @@ export async function fetchFirearmStats(firearmId) {
     null
   );
 
+  // Keyed by recipe_id (not title) so the UI can link each entry back to
+  // the actual recipe — a plain title string had nothing to link to.
   const roundsByRecipe = {};
   sessions.forEach((s) => {
     if (!s.recipe_id) return;
     const title = s.load_recipes?.title || 'Unknown recipe';
-    roundsByRecipe[title] = (roundsByRecipe[title] || 0) + (s.rounds_fired || 0);
+    if (!roundsByRecipe[s.recipe_id]) roundsByRecipe[s.recipe_id] = { recipeId: s.recipe_id, title, rounds: 0 };
+    roundsByRecipe[s.recipe_id].rounds += s.rounds_fired || 0;
   });
-  const recipesUsed = Object.entries(roundsByRecipe)
-    .map(([title, rounds]) => ({ title, rounds }))
-    .sort((a, b) => b.rounds - a.rounds);
+  const recipesUsed = Object.values(roundsByRecipe).sort((a, b) => b.rounds - a.rounds);
 
   return { sessionCount, bestGroupMoa, recipesUsed };
 }
