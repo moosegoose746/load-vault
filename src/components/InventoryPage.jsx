@@ -122,9 +122,11 @@ export default function InventoryPage({ authUser }) {
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [rowStatus, setRowStatus] = useState({}); // { [rowId]: 'saving' | 'saved' | 'error' }
+  const [rowStatus, setRowStatus] = useState({}); // { [rowId]: 'saving' | 'saved' | 'invalid' | 'error' }
+  const [rowError, setRowError] = useState({}); // { [rowId]: message } — only set for 'error' (server-side failures)
   const [newRows, setNewRows] = useState({ powder: emptyNewRow(), bullet: emptyNewRow(), primer: emptyNewRow(), brass: emptyNewRow() });
-  const [addStatus, setAddStatus] = useState({});
+  const [addStatus, setAddStatus] = useState({}); // { [type]: 'saving' | 'idle' | 'invalid' | 'error' }
+  const [addError, setAddError] = useState({}); // { [type]: message } — only set for 'error' (server-side failures)
 
   useEffect(() => {
     if (!authUser) {
@@ -179,7 +181,7 @@ export default function InventoryPage({ authUser }) {
     const isPowder = (row.component?.type ?? row.custom_type) === 'powder';
     const parsed = parseDraft(drafts[row.id] ?? draftFromRow(row, isPowder), isPowder);
     if (!parsed) {
-      setRowStatus((prev) => ({ ...prev, [row.id]: 'error' }));
+      setRowStatus((prev) => ({ ...prev, [row.id]: 'invalid' }));
       return;
     }
     setRowStatus((prev) => ({ ...prev, [row.id]: 'saving' }));
@@ -190,6 +192,7 @@ export default function InventoryPage({ authUser }) {
       setTimeout(() => setRowStatus((prev) => ({ ...prev, [row.id]: undefined })), 2000);
     } catch (err) {
       console.error('Failed to save inventory entry', err);
+      setRowError((prev) => ({ ...prev, [row.id]: err.message || 'Failed to save.' }));
       setRowStatus((prev) => ({ ...prev, [row.id]: 'error' }));
     }
   };
@@ -212,17 +215,22 @@ export default function InventoryPage({ authUser }) {
     const isPowder = type === 'powder';
     const newRow = newRows[type];
     const isCustom = newRow.componentId === CUSTOM_VALUE;
+    // Validation failures (nothing selected/typed, or a bad number) are
+    // 'invalid' — distinct from 'error' below (the save itself failing
+    // server-side, e.g. a pending database migration) so the message
+    // shown actually matches what went wrong instead of always saying
+    // "check the fields" even when the fields were fine.
     if (isCustom && !newRow.customName.trim()) {
-      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
+      setAddStatus((prev) => ({ ...prev, [type]: 'invalid' }));
       return;
     }
     if (!isCustom && !newRow.componentId) {
-      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
+      setAddStatus((prev) => ({ ...prev, [type]: 'invalid' }));
       return;
     }
     const parsed = parseDraft(newRow, isPowder);
     if (!parsed) {
-      setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
+      setAddStatus((prev) => ({ ...prev, [type]: 'invalid' }));
       return;
     }
     setAddStatus((prev) => ({ ...prev, [type]: 'saving' }));
@@ -239,6 +247,7 @@ export default function InventoryPage({ authUser }) {
       setAddStatus((prev) => ({ ...prev, [type]: 'idle' }));
     } catch (err) {
       console.error('Failed to add inventory entry', err);
+      setAddError((prev) => ({ ...prev, [type]: err.message || 'Failed to save.' }));
       setAddStatus((prev) => ({ ...prev, [type]: 'error' }));
     }
   };
@@ -461,8 +470,13 @@ export default function InventoryPage({ authUser }) {
                                 <Trash2 size={13} />
                               </button>
                             </div>
+                            {rstatus === 'invalid' && (
+                              <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Check purchase price / qty per package</p>
+                            )}
                             {rstatus === 'error' && (
-                              <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Invalid cost/qty</p>
+                              <p className="mt-1 max-w-[220px] whitespace-normal text-[10px] text-red-400">
+                                {rowError[row.id] || 'Failed to save — please try again.'}
+                              </p>
                             )}
                           </td>
                         </tr>
@@ -614,8 +628,13 @@ export default function InventoryPage({ authUser }) {
                           <Plus size={13} />
                           {status === 'saving' ? '…' : 'ADD'}
                         </button>
-                        {status === 'error' && (
+                        {status === 'invalid' && (
                           <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Check the fields above</p>
+                        )}
+                        {status === 'error' && (
+                          <p className="mt-1 max-w-[220px] whitespace-normal text-[10px] text-red-400">
+                            {addError[type] || 'Failed to save — please try again.'}
+                          </p>
                         )}
                       </td>
                     </tr>
