@@ -162,11 +162,23 @@ export function isLowStock(row) {
   return row.quantity_on_hand < row.package_qty * LOW_STOCK_RATIO;
 }
 
-/** Brass only: true once a batch has been fired at least as many times as
- * its own estimated reload_cycles ceiling — a signal to inspect/retire
- * those cases, not a hard cutoff. */
+/** Brass only: total estimated firings this lot's cases can absorb before
+ * needing inspection/retirement — `reload_cycles` is a PER-CASE estimate
+ * ("each case survives about N reloads"), so the lot's total capacity is
+ * that times however many cases are in it, not `reload_cycles` on its
+ * own (500 cases good for 1 reload each is 500 firings, not 1). Returns
+ * `null` if either input isn't known. */
+export function brassLotCapacity(row) {
+  if (row.reload_cycles == null || row.quantity_on_hand == null) return null;
+  return row.reload_cycles * row.quantity_on_hand;
+}
+
+/** Brass only: true once a lot has been fired at least as many times as
+ * its total estimated capacity (see brassLotCapacity) — a signal to
+ * inspect/retire those cases, not a hard cutoff. */
 export function isBrassNearingRetirement(row) {
-  return row.reload_cycles != null && row.cycles_used != null && row.cycles_used >= row.reload_cycles;
+  const capacity = brassLotCapacity(row);
+  return capacity != null && row.cycles_used != null && row.cycles_used >= capacity;
 }
 
 // --- Automated deduction on logging a Loading Session ------------------
@@ -272,7 +284,12 @@ export function computeBatchDeduction(recipeComponents, inventoryByComponent, ro
     lots.forEach((entry) => {
       if (remaining <= 0) return;
       const currentCycles = entry.cycles_used ?? 0;
-      const capacity = entry.reload_cycles != null ? Math.max(0, entry.reload_cycles - currentCycles) : remaining;
+      // reload_cycles is a PER-CASE estimate, so this lot's total capacity
+      // is that times how many cases are in it (see brassLotCapacity) —
+      // NOT reload_cycles on its own, which would make a 500-case lot
+      // with a "1 reload" estimate max out after a single round.
+      const lotCapacity = brassLotCapacity(entry);
+      const capacity = lotCapacity != null ? Math.max(0, lotCapacity - currentCycles) : remaining;
       const take = Math.min(remaining, capacity);
       if (take <= 0) return; // this lot's already at/over its estimated max — move on to the next one
       remaining -= take;
@@ -288,8 +305,8 @@ export function computeBatchDeduction(recipeComponents, inventoryByComponent, ro
         kind: 'cycles',
         currentCycles,
         newCycles,
-        maxCycles: entry.reload_cycles ?? null,
-        nearingRetirement: entry.reload_cycles != null && newCycles >= entry.reload_cycles,
+        maxCycles: lotCapacity,
+        nearingRetirement: lotCapacity != null && newCycles >= lotCapacity,
         lotCaliber: entry.caliber?.name ?? null,
       });
     });
