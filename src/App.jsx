@@ -164,7 +164,7 @@ function AppShell() {
   return (
     <div
       className={`flex min-h-screen flex-col bg-canvas text-slate-100 ${
-        rangeMode ? 'text-lg' : ''
+        rangeMode ? 'range-mode' : ''
       }`}
     >
       {DEV_SKIP_AUTH && (

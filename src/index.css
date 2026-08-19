@@ -1,3 +1,78 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Range Mode — Section 3 "Specialized UX Views."
+ *
+ * Toggled from the Header; adds/removes the `range-mode` class on the
+ * app's root element (see App.jsx / RangeModeContext.jsx). Built for
+ * using the app on a shooting bench outdoors, often in direct sunlight:
+ * bigger tap targets for gloved/imprecise fingers, and much higher
+ * contrast than the normal dark-mode palette, whose mid-grays wash out
+ * in bright light.
+ *
+ * These rules are scoped under the `.range-mode` ancestor class, which
+ * gives them higher selector specificity than the plain Tailwind utility
+ * classes they override (e.g. `.range-mode button` beats `.px-3` on its
+ * own), so most of this works without `!important`. A few color utilities
+ * are matched at equal specificity (one class vs one class), so those use
+ * `!important` to guarantee they win regardless of source order.
+ */
+
+.range-mode {
+  font-size: 1.125rem;
+}
+
+/* Bigger tap targets on every interactive control. */
+.range-mode button,
+.range-mode select,
+.range-mode input,
+.range-mode textarea {
+  min-height: 3rem;
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+  font-size: 1.05rem;
+  border-width: 2px;
+}
+
+.range-mode button svg,
+.range-mode label svg {
+  width: 1.25em;
+  height: 1.25em;
+}
+
+/* Maximum contrast: pure black backgrounds, pure white body text, and
+   brighter borders/labels than the normal muted-slate palette. */
+.range-mode.bg-canvas,
+.range-mode .bg-canvas {
+  background-color: #000000 !important;
+}
+
+.range-mode .bg-panel {
+  background-color: #0a0a0a !important;
+}
+
+.range-mode .text-slate-100,
+.range-mode .text-slate-300,
+.range-mode .text-slate-400 {
+  color: #ffffff !important;
+}
+
+.range-mode .text-slate-500,
+.range-mode .text-slate-600 {
+  color: #e2e8f0 !important;
+}
+
+.range-mode .border-slate-700,
+.range-mode .border-slate-800 {
+  border-color: #94a3b8 !important;
+}
+
+.range-mode .text-amber-400 {
+  color: #ffcc55 !important;
+}
+
+.range-mode .border-amber-500 {
+  border-color: #ffcc55 !important;
+}
