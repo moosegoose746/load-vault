@@ -20,6 +20,20 @@ function SpecRow({ label, value }) {
   );
 }
 
+// For the derived numbers that get checked most (Cost/Round, Loaded &
+// Ready — see the UX audit) — an amber-highlighted row instead of a
+// plain SpecRow, so they stand out from raw component specs (Caliber,
+// COAL, etc.) and from Loadable From Stock, which is more of a
+// secondary projection than a number you'd check at a glance.
+function HighlightRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between rounded bg-amber-500/10 px-2 py-2">
+      <span className="text-xs font-semibold uppercase tracking-wide text-amber-400">{label}</span>
+      <span className="font-mono text-base font-bold text-amber-300">{value}</span>
+    </div>
+  );
+}
+
 export default function Sidebar({
   recipe,
   userRecipes,
@@ -109,14 +123,17 @@ export default function Sidebar({
 
         <div className="my-2 border-t border-slate-800" />
 
-        <SpecRow
-          label="Cost / Round"
-          value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}
-        />
-        <SpecRow
-          label="Loaded & Ready"
-          value={recipe.roundsOnHand != null ? `${recipe.roundsOnHand} rounds` : '—'}
-        />
+        <div className="flex flex-col gap-1.5 pb-1.5">
+          <HighlightRow
+            label="Cost / Round"
+            value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}
+          />
+          <HighlightRow
+            label="Loaded & Ready"
+            value={recipe.roundsOnHand != null ? `${recipe.roundsOnHand} rounds` : '—'}
+          />
+        </div>
+
         <SpecRow
           label="Loadable From Stock"
           value={

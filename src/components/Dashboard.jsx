@@ -312,8 +312,11 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
               // free-text rifle_model for recipes created before that
               // link existed and never given one, or '—' for a recipe
               // that's never had either.
+              //
+              // Powder used to be duplicated here too — dropped per the
+              // UX audit since it's already shown in Sidebar's Component
+              // Specs card; no reason to show the same value twice.
               { label: 'Firearm', value: recipe.firearmLabel ?? recipe.rifleModel ?? '—' },
-              { label: 'Powder', value: recipe.powder },
             ]}
           />
 

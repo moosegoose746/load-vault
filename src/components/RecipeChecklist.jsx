@@ -1,15 +1,20 @@
-import { CheckSquare } from 'lucide-react';
-
-// Section 3: "Component & Rifle Metadata Checklist — Checkbox toggle list
-// showing the rifle configuration."
+// Section 3: "Recipe metadata" — plain label/value rows for recipe-level
+// details that live outside the component list (currently just the
+// linked Firearm). Previously styled as a checkbox list with a
+// permanently-"checked" icon next to every row, which read as
+// interactive/toggleable when it never was (flagged in the UX audit).
+// Restyled to match the plain label/value rows used elsewhere (see
+// Sidebar's SpecRow) instead of implying a checklist.
 export default function RecipeChecklist({ items }) {
   return (
-    <div className="flex flex-col gap-2 rounded border border-slate-800 bg-panel p-3">
+    <div className="flex flex-col rounded border border-slate-800 bg-panel p-3">
       {items.map(({ label, value }) => (
-        <div key={label} className="flex items-center gap-2 font-mono text-sm">
-          <CheckSquare size={16} className="shrink-0 text-emerald-500" />
-          <span className="text-slate-400">{label}:</span>
-          <span className="text-slate-100">{value}</span>
+        <div
+          key={label}
+          className="flex items-center justify-between border-b border-slate-800 py-1.5 last:border-none"
+        >
+          <span className="text-xs text-slate-400">{label}</span>
+          <span className="font-mono text-sm text-slate-100">{value}</span>
         </div>
       ))}
     </div>
