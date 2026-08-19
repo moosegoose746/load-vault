@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Boxes, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
-import RecipeChecklist from './RecipeChecklist.jsx';
+import FirearmSummaryCard from './FirearmSummaryCard.jsx';
+import RecipeNotesCard from './RecipeNotesCard.jsx';
+import VelocitySparkline from './VelocitySparkline.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
 import ChronoImport from './ChronoImport.jsx';
@@ -11,7 +13,7 @@ import { useSync } from '../context/SyncContext.jsx';
 import { createLoadBatch, createRangeSession } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
 import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
-import { fetchUserFirearms } from '../lib/firearms.js';
+import { fetchUserFirearms, fetchRoundsFiredByFirearm } from '../lib/firearms.js';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
@@ -73,6 +75,15 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const [firearms, setFirearms] = useState([]);
   const [firearmId, setFirearmId] = useState('');
   const [firearmIdEdited, setFirearmIdEdited] = useState(false);
+  const [roundsFiredByFirearm, setRoundsFiredByFirearm] = useState({});
+
+  // Local echo of the recipe's notes so RecipeNotesCard can reflect a save
+  // immediately without waiting on a full recipe refetch — reset whenever
+  // the active recipe (or its fetched notes) actually changes.
+  const [notesOverride, setNotesOverride] = useState(recipe.notes || '');
+  useEffect(() => {
+    setNotesOverride(recipe.notes || '');
+  }, [activeRecipeId, recipe.notes]);
 
   // Loading Session state — logging a batch actually assembles ammo and
   // is what triggers component deduction (see computeBatchDeduction/
@@ -126,7 +137,18 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     fetchUserFirearms(authUser.id)
       .then(setFirearms)
       .catch((err) => console.error('Failed to load firearms for range session', err));
+    fetchRoundsFiredByFirearm(authUser.id)
+      .then(setRoundsFiredByFirearm)
+      .catch((err) => console.error('Failed to load rounds-fired-by-firearm', err));
   }, [isRealRecipe, authUser, activeRecipeId]);
+
+  // The real Firearm Profile linked to this recipe, if any — derived from
+  // the firearms list already fetched above rather than a new per-recipe
+  // fetch, for the Overview tab's FirearmSummaryCard.
+  const linkedFirearm = useMemo(
+    () => firearms.find((f) => f.id === recipe.firearmId) || null,
+    [firearms, recipe.firearmId]
+  );
 
   // Only offer firearms that actually match this recipe's caliber —
   // same reasoning as caliber-matched inventory lots: a .223 rifle isn't
@@ -323,20 +345,81 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
             <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
           </div>
 
-          <RecipeChecklist
-            items={[
-              // Prefer the recipe's linked Firearm Profile (see
-              // schema_recipes_v2.sql); fall back to the legacy
-              // free-text rifle_model for recipes created before that
-              // link existed and never given one, or '—' for a recipe
-              // that's never had either.
-              //
-              // Powder used to be duplicated here too — dropped per the
-              // UX audit since it's already shown in Sidebar's Component
-              // Specs card; no reason to show the same value twice.
-              { label: 'Firearm', value: recipe.firearmLabel ?? recipe.rifleModel ?? '—' },
-            ]}
-          />
+          {isRealRecipe ? (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <FirearmSummaryCard firearm={linkedFirearm} roundsFiredByFirearm={roundsFiredByFirearm} />
+
+                <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                  <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                    Recent Activity
+                    <InfoTooltip>The most recent Loading Session (bench) and Range Session (shooting) logged for this recipe.</InfoTooltip>
+                  </span>
+                  <div className="mt-3 flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Last loaded</span>
+                    <span className="font-mono text-slate-200">
+                      {recipe.lastLoadedAt
+                        ? `${recipe.lastLoadedRounds ?? '?'} rds — ${new Date(recipe.lastLoadedAt).toLocaleDateString()}`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between border-t border-slate-800 pt-2 text-xs">
+                    <span className="text-slate-500">Last fired</span>
+                    <span className="font-mono text-slate-200">
+                      {recipe.lastFiredAt
+                        ? `${recipe.lastFiredRounds ?? '?'} rds — ${new Date(recipe.lastFiredAt).toLocaleDateString()}`
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {(recipe.targetImageUrl || (displayShots && displayShots.length >= 2)) && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {recipe.targetImageUrl && (
+                    <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                      <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                        Last Target
+                        <InfoTooltip>The most recent saved target photo for this recipe, from Range Day.</InfoTooltip>
+                      </span>
+                      <div className="mt-2 flex items-center gap-3">
+                        <img
+                          src={recipe.targetImageUrl}
+                          alt="Last saved target"
+                          className="h-16 w-16 shrink-0 rounded border border-slate-700 object-cover"
+                        />
+                        <span className="font-mono text-2xl font-semibold text-slate-100">
+                          {recipe.groupSizeMoa != null ? `${recipe.groupSizeMoa.toFixed(2)} MOA` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {displayShots && displayShots.length >= 2 && (
+                    <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                      <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                        Velocity Trend
+                        <InfoTooltip>Per-shot velocity from the most recent chrono log for this recipe, in shot order.</InfoTooltip>
+                      </span>
+                      <div className="mt-2">
+                        <VelocitySparkline shots={displayShots} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <RecipeNotesCard
+                recipeId={activeRecipeId}
+                notes={notesOverride}
+                onSaved={setNotesOverride}
+              />
+            </>
+          ) : (
+            <div className="rounded border border-slate-700 bg-slate-900/60 p-4 text-xs text-slate-400">
+              Firearm: {recipe.firearmLabel ?? recipe.rifleModel ?? '—'}
+            </div>
+          )}
 
           {!isRealRecipe && (
             <p className="rounded border border-slate-800 bg-panel px-4 py-3 font-mono text-xs text-slate-500">

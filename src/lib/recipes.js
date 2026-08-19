@@ -208,6 +208,23 @@ async function fetchTotalRoundsLoaded(recipeId) {
   return (data || []).reduce((sum, b) => sum + (b.rounds_loaded || 0), 0);
 }
 
+/** Most recent Loading Session (load_batches row) for this recipe — used
+ * to power the "Recent Activity" summary on the Overview tab (last loaded
+ * date + rounds), same idea as the most-recent range_session already
+ * fetched in fetchRecipeDetail but for the loading side instead of the
+ * shooting side. Returns `null` if this recipe has never had a Loading
+ * Session logged. */
+async function fetchLastLoadingBatch(recipeId) {
+  const { data, error } = await supabase
+    .from('load_batches')
+    .select('rounds_loaded, notes, created_at')
+    .eq('recipe_id', recipeId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0] ?? null;
+}
+
 /** Log a Loading Session — a batch of `roundsLoaded` rounds of this
  * recipe actually assembled at the bench. This is what should trigger
  * component deduction (see computeBatchDeduction/applyBatchDeduction in
@@ -222,7 +239,7 @@ export async function createLoadBatch({ recipeId, userId, roundsLoaded, notes })
   return data;
 }
 
-function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsLoaded) {
+function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
   const costPerRound = calculateCostPerRound(row, inventory);
   const factoryPricePerRound = row.factory_price_per_round ?? null;
@@ -301,6 +318,18 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     // recipes that have never had a session logged yet.
     defaultFirearmId: session?.firearm_id ?? row.firearm_id ?? null,
     shots: shots ?? [],
+    // Free-text notes captured at recipe creation (see RecipeForm.jsx) —
+    // selected by fetchRecipeDetail's query but previously never mapped
+    // into the view model, so nothing could render it. Now shown +
+    // inline-editable on the Overview tab (see RecipeNotesCard.jsx).
+    notes: row.notes || '',
+    // "Recent Activity" summary on Overview — last time this recipe was
+    // loaded at the bench vs. last time it was fired at the range. Both
+    // independently null if that side has never happened yet.
+    lastLoadedAt: lastBatch?.created_at ?? null,
+    lastLoadedRounds: lastBatch?.rounds_loaded ?? null,
+    lastFiredAt: session?.created_at ?? null,
+    lastFiredRounds: session?.rounds_fired ?? null,
   };
 }
 
@@ -355,12 +384,13 @@ export async function fetchRecipeDetail(recipeId, userId) {
   }
 
   const inventory = userId ? await fetchUserInventoryMap(userId) : {};
-  const [roundsOnHand, totalRoundsLoaded] = await Promise.all([
+  const [roundsOnHand, totalRoundsLoaded, lastBatch] = await Promise.all([
     fetchRoundsOnHand(recipeId),
     fetchTotalRoundsLoaded(recipeId),
+    fetchLastLoadingBatch(recipeId),
   ]);
 
-  return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand, totalRoundsLoaded);
+  return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch);
 }
 
 /** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
@@ -470,6 +500,19 @@ export async function updateRecipeFactoryPrice(recipeId, factoryPricePerRound) {
   const { error } = await supabase
     .from('load_recipes')
     .update({ factory_price_per_round: factoryPricePerRound })
+    .eq('id', recipeId);
+  if (error) throw error;
+}
+
+/** Set (or clear, passing '') a recipe's free-text notes — same narrow
+ * single-field pattern as updateRecipeFactoryPrice above, exposed from the
+ * Overview tab's Notes card so a user can jot something down mid-range-day
+ * or mid-loading-session without a full recipe-edit flow. RLS's "Users
+ * manage own recipes" policy covers the UPDATE. */
+export async function updateRecipeNotes(recipeId, notes) {
+  const { error } = await supabase
+    .from('load_recipes')
+    .update({ notes: notes || null })
     .eq('id', recipeId);
   if (error) throw error;
 }
