@@ -41,6 +41,7 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
     brassId: '',
     coalInches: '',
     firearmId: '',
+    factoryPricePerRound: '',
     notes: '',
   });
 
@@ -110,6 +111,9 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
           brassId: form.brassId,
           coalInches: form.coalInches ? Number.parseFloat(form.coalInches) : null,
           firearmId: form.firearmId,
+          factoryPricePerRound: form.factoryPricePerRound
+            ? Number.parseFloat(form.factoryPricePerRound)
+            : null,
           notes: form.notes,
         },
         authUser.id
@@ -248,6 +252,22 @@ export default function RecipeForm({ open, onClose, onCreated, authUser }) {
                 )}
               </Field>
             </div>
+
+            <Field label="Comparable Factory Price (optional, $/round)">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.factoryPricePerRound}
+                onChange={update('factoryPricePerRound')}
+                className={inputClass}
+                placeholder="e.g. 1.25"
+              />
+              <span className="font-mono text-[10px] text-slate-600">
+                What comparable factory ammo costs per round — used to show how much this recipe
+                saves you. Leave blank to skip; you can add it later from the Sidebar.
+              </span>
+            </Field>
 
             <Field label="Notes">
               <textarea value={form.notes} onChange={update('notes')} rows={2} className={inputClass} />

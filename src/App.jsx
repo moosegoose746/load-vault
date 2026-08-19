@@ -193,6 +193,7 @@ function AppShell() {
               onSelectRecipe={setActiveRecipeId}
               onNewRecipe={() => setRecipeFormOpen(true)}
               onDeleteRecipe={handleDeleteRecipe}
+              onRecipeUpdated={loadActiveRecipe}
               liveMoa={liveMoa}
             />
             <Dashboard

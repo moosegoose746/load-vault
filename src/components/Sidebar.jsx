@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import MoaBadge from './MoaBadge.jsx';
+import { updateRecipeFactoryPrice } from '../lib/recipes.js';
 
 // Section 3: "Left Sidebar (Specs & Filter Panel) — Prominent MOA Badge,
 // Dropdown Selectors (Caliber/Powder/Bullet), Quick Spec List."
@@ -25,12 +26,122 @@ function SpecRow({ label, value }) {
 // plain SpecRow, so they stand out from raw component specs (Caliber,
 // COAL, etc.) and from Loadable From Stock, which is more of a
 // secondary projection than a number you'd check at a glance.
-function HighlightRow({ label, value }) {
+function HighlightRow({ label, value, tone = 'amber', children }) {
+  const toneClasses =
+    tone === 'emerald'
+      ? { bg: 'bg-emerald-500/10', label: 'text-emerald-400', value: 'text-emerald-300' }
+      : { bg: 'bg-amber-500/10', label: 'text-amber-400', value: 'text-amber-300' };
   return (
-    <div className="flex items-center justify-between rounded bg-amber-500/10 px-2 py-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-amber-400">{label}</span>
-      <span className="font-mono text-base font-bold text-amber-300">{value}</span>
+    <div className={`flex items-center justify-between rounded ${toneClasses.bg} px-2 py-2`}>
+      <span className={`text-xs font-semibold uppercase tracking-wide ${toneClasses.label}`}>{label}</span>
+      <div className="flex items-center gap-2">
+        <span className={`font-mono text-base font-bold ${toneClasses.value}`}>{value}</span>
+        {children}
+      </div>
     </div>
+  );
+}
+
+const formatMoney = (n) => `$${n.toFixed(2)}`;
+
+// Money Saved vs. Factory Ammo — only computable once the user has
+// entered a Comparable Factory Price for this recipe (see
+// schema_recipes_v3.sql / mapRecipeRow's moneySaved). Since there's no
+// general recipe-edit UI (recipes are create-once via RecipeForm.jsx),
+// setting/changing that price happens right here instead — a narrow
+// inline editor rather than a whole edit flow just for one field. Only
+// rendered for a real saved recipe (`recipeId` set); the demo recipe has
+// nothing to persist a price against.
+function MoneySavedRow({ recipe, recipeId, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setEditing(false);
+    setInput('');
+    setError('');
+  }, [recipeId]);
+
+  if (!recipeId) return null;
+
+  const startEditing = () => {
+    setInput(recipe.factoryPricePerRound != null ? String(recipe.factoryPricePerRound) : '');
+    setError('');
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    const parsed = input === '' ? null : Number.parseFloat(input);
+    if (input !== '' && (Number.isNaN(parsed) || parsed < 0)) {
+      setError('Enter a valid price, or leave blank to clear it.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await updateRecipeFactoryPrice(recipeId, parsed);
+      setEditing(false);
+      await onSaved();
+    } catch (err) {
+      setError(err.message || 'Failed to save.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5 rounded border border-slate-700 bg-slate-900 p-2">
+        <span className="text-xs text-slate-400">Comparable factory price ($/round)</span>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            autoFocus
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="e.g. 1.25"
+            className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+          />
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded border border-amber-500 px-2 py-1 font-mono text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-40"
+          >
+            {saving ? '…' : 'SAVE'}
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="rounded border border-slate-700 px-2 py-1 font-mono text-xs text-slate-300 hover:border-slate-500"
+          >
+            CANCEL
+          </button>
+        </div>
+        {error && <p className="font-mono text-[10px] text-red-400">{error}</p>}
+      </div>
+    );
+  }
+
+  if (recipe.moneySaved != null) {
+    return (
+      <HighlightRow label="Money Saved" value={`${formatMoney(recipe.moneySaved)} saved`} tone="emerald">
+        <button onClick={startEditing} aria-label="Edit factory price" className="text-emerald-400/70 hover:text-emerald-300">
+          <Pencil size={12} />
+        </button>
+      </HighlightRow>
+    );
+  }
+
+  return (
+    <button
+      onClick={startEditing}
+      className="rounded border border-dashed border-slate-700 px-2 py-1.5 text-left font-mono text-[11px] text-slate-500 hover:border-amber-500 hover:text-amber-400"
+    >
+      + Add factory price to see money saved
+    </button>
   );
 }
 
@@ -41,6 +152,7 @@ export default function Sidebar({
   onSelectRecipe,
   onNewRecipe,
   onDeleteRecipe,
+  onRecipeUpdated,
   liveMoa,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -131,6 +243,11 @@ export default function Sidebar({
           <HighlightRow
             label="Loaded & Ready"
             value={recipe.roundsOnHand != null ? `${recipe.roundsOnHand} rounds` : '—'}
+          />
+          <MoneySavedRow
+            recipe={recipe}
+            recipeId={activeRecipeId}
+            onSaved={onRecipeUpdated ?? (() => Promise.resolve())}
           />
         </div>
 

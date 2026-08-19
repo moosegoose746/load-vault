@@ -193,6 +193,21 @@ export async function fetchCurrentlyLoadedByBrassCaliber(userId) {
   return byKey;
 }
 
+/** Total rounds of this recipe EVER logged as loaded — plain
+ * SUM(load_batches.rounds_loaded), no subtraction for rounds fired. This
+ * is deliberately different from fetchRoundsOnHand above: Money Saved
+ * (see mapRecipeRow) should reflect every round this recipe has ever
+ * saved money on, not just what's presently sitting loaded and unfired —
+ * it shouldn't go DOWN just because some of that ammo got shot. */
+async function fetchTotalRoundsLoaded(recipeId) {
+  const { data, error } = await supabase
+    .from('load_batches')
+    .select('rounds_loaded')
+    .eq('recipe_id', recipeId);
+  if (error) throw error;
+  return (data || []).reduce((sum, b) => sum + (b.rounds_loaded || 0), 0);
+}
+
 /** Log a Loading Session — a batch of `roundsLoaded` rounds of this
  * recipe actually assembled at the bench. This is what should trigger
  * component deduction (see computeBatchDeduction/applyBatchDeduction in
@@ -207,8 +222,22 @@ export async function createLoadBatch({ recipeId, userId, roundsLoaded, notes })
   return data;
 }
 
-function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
+function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsLoaded) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
+  const costPerRound = calculateCostPerRound(row, inventory);
+  const factoryPricePerRound = row.factory_price_per_round ?? null;
+  // Money Saved vs. Factory Ammo — only computable once BOTH a factory
+  // price has been entered AND cost-per-round is known (every selected
+  // component has a saved price — see calculateCostPerRound). Uses
+  // lifetime rounds loaded (fetchTotalRoundsLoaded), not roundsOnHand, so
+  // it reflects money saved on every round ever assembled under this
+  // recipe rather than shrinking as ammo gets fired. `totalRoundsLoaded`
+  // of 0 (recipe created but nothing loaded yet) legitimately yields $0
+  // saved so far, not "unknown" — still shown once a factory price exists.
+  const moneySaved =
+    factoryPricePerRound != null && costPerRound != null
+      ? (factoryPricePerRound - costPerRound) * (totalRoundsLoaded ?? 0)
+      : null;
   return {
     id: row.id,
     title: row.title,
@@ -249,7 +278,13 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
     stdDevFps: session?.std_dev_fps ?? null,
     extremeSpread: session?.extreme_spread_fps ?? null,
     targetImageUrl: session?.target_image_url ?? null,
-    costPerRound: calculateCostPerRound(row, inventory),
+    costPerRound,
+    // See schema_recipes_v3.sql. factoryPricePerRound is the raw
+    // user-entered value (used to pre-fill the edit input in Sidebar);
+    // moneySaved is the derived stat actually rendered — both null until
+    // the user sets a factory price for this recipe.
+    factoryPricePerRound,
+    moneySaved,
     ...calculateLoadableFromStock(row, inventory),
     // How many rounds of this recipe are currently loaded & ready to
     // shoot — see fetchRoundsOnHand above. `undefined` (not fetched, e.g.
@@ -286,7 +321,7 @@ export async function fetchRecipeDetail(recipeId, userId) {
     .from('load_recipes')
     .select(
       `
-      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, firearm_id, notes,
+      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, firearm_id, notes, factory_price_per_round,
       calibers ( name ),
       firearm:firearms ( id, name ),
       powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
@@ -320,9 +355,12 @@ export async function fetchRecipeDetail(recipeId, userId) {
   }
 
   const inventory = userId ? await fetchUserInventoryMap(userId) : {};
-  const roundsOnHand = await fetchRoundsOnHand(recipeId);
+  const [roundsOnHand, totalRoundsLoaded] = await Promise.all([
+    fetchRoundsOnHand(recipeId),
+    fetchTotalRoundsLoaded(recipeId),
+  ]);
 
-  return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand);
+  return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand, totalRoundsLoaded);
 }
 
 /** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
@@ -355,11 +393,26 @@ export async function createRecipe(fields, userId) {
       coal_inches: fields.coalInches || null,
       firearm_id: fields.firearmId || null,
       notes: fields.notes || null,
+      factory_price_per_round: fields.factoryPricePerRound || null,
     })
     .select()
     .single();
   if (error) throw error;
   return data;
+}
+
+/** Set (or clear, passing null) a recipe's Comparable Factory Price —
+ * there's no general recipe-edit UI yet (recipes are create-once via
+ * RecipeForm.jsx), so this is a narrow, single-field update exposed
+ * directly from Sidebar's Money Saved section rather than building a
+ * full edit flow just for this one optional field. RLS's "Users manage
+ * own recipes" policy covers the UPDATE. */
+export async function updateRecipeFactoryPrice(recipeId, factoryPricePerRound) {
+  const { error } = await supabase
+    .from('load_recipes')
+    .update({ factory_price_per_round: factoryPricePerRound })
+    .eq('id', recipeId);
+  if (error) throw error;
 }
 
 /** Upload a compressed target-photo Blob to Supabase Storage and return its
