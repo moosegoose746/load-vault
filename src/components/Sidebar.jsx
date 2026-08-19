@@ -13,14 +13,20 @@ import { updateRecipeFactoryPrice } from '../lib/recipes.js';
 // recipe to view, or create a new one. The specs below always reflect
 // whichever recipe (real or the built-in demo) is currently active.
 
+// items-start (not items-center) + a non-wrapping, non-shrinking label is
+// deliberate: a long value (e.g. ".223 Remington / 5.56 NATO") wraps to
+// two lines at the Sidebar's width, and items-center was pulling the
+// label down to vertically center against the now-taller wrapped value
+// instead of staying pinned to its first line. text-right on the value
+// keeps wrapped lines readable instead of straddling the row's center.
 function SpecRow({ label, value, info }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-800 py-1.5 last:border-none">
-      <span className="flex items-center text-xs text-slate-400">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-800 py-2 last:border-none">
+      <span className="flex shrink-0 items-center whitespace-nowrap text-xs text-slate-400">
         {label}
         {info && <InfoTooltip align="left">{info}</InfoTooltip>}
       </span>
-      <span className="font-mono text-sm text-slate-100">{value}</span>
+      <span className="text-right font-mono text-sm text-slate-100">{value}</span>
     </div>
   );
 }
@@ -133,22 +139,39 @@ function MoneySavedRow({ recipe, recipeId, onSaved }) {
   }
 
   if (recipe.moneySaved != null) {
+    // Deliberately NOT the shared HighlightRow layout — cramming
+    // "MONEY SAVED" + the info icon + a dollar value + "saved" + an edit
+    // pencil all onto one label/value line was too tight at the
+    // Sidebar's width and caused both sides to wrap unpredictably. Label
+    // (with the edit pencil alongside it, not the value) on its own top
+    // line, one big value line underneath — same visual weight as
+    // HighlightRow, just stacked instead of squeezed side by side.
     return (
-      <div className="flex flex-col gap-1">
-        <HighlightRow
-          label="Money Saved"
-          value={`${formatMoney(recipe.moneySaved)} saved`}
-          tone="emerald"
-          info="(factory price − your cost/round) × every round you've ever loaded of this recipe. Doesn't go down as ammo gets fired — it's lifetime savings, not what's currently on hand."
-        >
-          <button onClick={startEditing} aria-label="Edit factory price" className="text-emerald-400/70 hover:text-emerald-300">
+      <div className="flex flex-col gap-1 rounded bg-emerald-500/10 px-2 py-2">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-emerald-400">
+            Money Saved
+            <InfoTooltip align="left">
+              (factory price − your cost/round) × every round you've ever loaded of this recipe.
+              Doesn't go down as ammo gets fired — it's lifetime savings, not what's currently on
+              hand.
+            </InfoTooltip>
+          </span>
+          <button
+            onClick={startEditing}
+            aria-label="Edit factory price"
+            className="text-emerald-400/70 hover:text-emerald-300"
+          >
             <Pencil size={12} />
           </button>
-        </HighlightRow>
+        </div>
+        <span className="font-mono text-base font-bold text-emerald-300">
+          {formatMoney(recipe.moneySaved)}
+        </span>
         {/* Show the comparable factory price itself right here, not just
             the derived savings — the user shouldn't have to open the
             editor just to see what number they entered. */}
-        <p className="px-2 font-mono text-[10px] text-slate-500">
+        <p className="font-mono text-[10px] text-slate-500">
           vs. {formatMoney(recipe.factoryPricePerRound)}/rd factory
         </p>
       </div>
@@ -245,10 +268,15 @@ export default function Sidebar({
         <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">
           Component Specs
         </h2>
+        {/* Charge Weight moved right under Powder — it's a property of
+            the powder charge, so it reads more naturally directly below
+            it than separated by Bullet. The value also no longer repeats
+            the powder name (e.g. "25 gr Hodgon H4350") — that's redundant
+            with the Powder row directly above it, just "25 gr" now. */}
         <SpecRow label="Caliber" value={recipe.caliber} />
         <SpecRow label="Powder" value={recipe.powder} />
+        <SpecRow label="Charge Weight" value={recipe.chargeGrains != null ? `${recipe.chargeGrains} gr` : '—'} />
         <SpecRow label="Bullet" value={recipe.bullet} />
-        <SpecRow label="Charge Weight" value={`${recipe.chargeGrains ?? '—'} gr ${recipe.powder}`} />
         <SpecRow label="COAL" value={recipe.coalInches ? `${recipe.coalInches}"` : '—'} />
         <SpecRow label="Primer" value={recipe.primer} />
         <SpecRow label="Brass" value={recipe.brass} />
@@ -259,7 +287,7 @@ export default function Sidebar({
           <HighlightRow
             label="Cost / Round"
             value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}
-            info='What one round of this recipe costs in components, from your own saved Inventory pricing. Shows "—" if any component doesn&apos;t have a saved price yet.'
+            info={`What one round of this recipe costs in components, from your own saved Inventory pricing. Shows "—" if any component doesn't have a saved price yet.`}
           />
           <HighlightRow
             label="Loaded & Ready"
