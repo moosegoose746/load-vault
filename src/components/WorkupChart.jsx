@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 const WIDTH = 520;
 const HEIGHT = 300;
@@ -160,11 +161,18 @@ export default function WorkupChart({ rungs }) {
   const sdMedian = sdValues.length >= 3 ? median(sdValues) : null;
   const isErratic = (r) => sdMedian != null && r.stdDevFps != null && r.stdDevFps > sdMedian * 1.5;
   const anyErratic = usable.some(isErratic);
+  const erraticRungs = usable.filter(isErratic);
 
   const active = activeId != null ? usable.find((r) => r.id === activeId) : null;
 
   return (
-    <div className="relative" ref={wrapRef}>
+    <div ref={wrapRef}>
+      {/* This inner div is its OWN relative positioning context, separate
+          from the legend/observations below — the Tooltip's x/y are plotted
+          as percentages of this box's exact pixel size (which matches the
+          SVG's own aspect ratio 1:1), so extra content stacking below it
+          (legend, observations panel) can't skew where the tooltip lands. */}
+      <div className="relative">
       <svg width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" className="overflow-visible">
         {/* Recessive gridlines + y-axis labels, one-step-off-surface gray,
             hairline, solid — never dashed (marks-and-anatomy.md). */}
@@ -271,28 +279,6 @@ export default function WorkupChart({ rungs }) {
         })}
       </svg>
 
-      {/* Caption/legend — outside the SVG so it never has to fight with
-          data marks for space, and can grow/wrap freely. Line keys, not
-          boxes, per the dataviz skill's tooltip/legend guidance. */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-slate-500">
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-2 rounded-full bg-amber-400" /> rung average (tap for detail)
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400/40" /> individual shot
-        </span>
-        {fit && (
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-px w-3 border-t border-dashed border-slate-500" /> fitted trend
-          </span>
-        )}
-        {anyErratic && (
-          <span className="flex items-center gap-1 text-red-400">
-            <span className="inline-block h-2 w-2 rounded-full bg-red-400" /> spread notably higher than this ladder's median
-          </span>
-        )}
-      </div>
-
       {active && (
         <Tooltip
           xPercent={(toX(active.chargeGrains) / WIDTH) * 100}
@@ -340,6 +326,64 @@ export default function WorkupChart({ rungs }) {
           {active.notes && <div className="max-w-[14rem] whitespace-normal text-slate-500">{active.notes}</div>}
         </Tooltip>
       )}
+      </div>
+
+      {/* Caption/legend — outside the SVG so it never has to fight with
+          data marks for space, and can grow/wrap freely. Line keys, not
+          boxes, per the dataviz skill's tooltip/legend guidance. */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-slate-500">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full bg-amber-400" /> rung average (tap for detail)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400/40" /> individual shot
+        </span>
+        {fit && (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-px w-3 border-t border-dashed border-slate-500" /> fitted trend
+          </span>
+        )}
+        {anyErratic && (
+          <span className="flex items-center gap-1 text-red-400">
+            <span className="inline-block h-2 w-2 rounded-full bg-red-400" /> spread notably higher than this ladder's median
+          </span>
+        )}
+      </div>
+
+      {/* Observations — purely descriptive, statistically-derived facts
+          about THIS ladder (never a verdict on any specific charge, never
+          the word "safe"/"unsafe", never a suggestion of what to load
+          next). Amber/warning-styled only when something is actually
+          flagged; otherwise a neutral, muted box so the disclaimer doesn't
+          cry wolf on a clean ladder. Always visible — per-rung nudges are
+          conditional, the safety disclaimer at the bottom is not. */}
+      <div
+        className={`mt-2 flex gap-2 rounded border px-3 py-2 text-xs leading-relaxed ${
+          erraticRungs.length > 0
+            ? 'border-amber-600 bg-amber-500/10 text-amber-200'
+            : 'border-slate-700 bg-slate-900/40 text-slate-400'
+        }`}
+      >
+        {erraticRungs.length > 0 && (
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />
+        )}
+        <div className="space-y-1.5">
+          {erraticRungs.map((r) => (
+            <p key={r.id}>
+              <span className="font-mono font-semibold">{r.chargeGrains} gr</span> has the widest shot-to-shot
+              spread in this ladder (SD {r.stdDevFps} fps vs. a {sdMedian} fps median across the other rungs).
+              Inconsistent velocity at a single charge can be an early sign of a pressure-sensitive spot — check
+              for pressure signs (flattened or cratered primers, hard bolt lift, ejector marks) and consider
+              testing smaller increments around this charge before drawing conclusions from the average alone.
+            </p>
+          ))}
+          <p className={erraticRungs.length > 0 ? 'text-amber-300/70' : ''}>
+            Always work up loads in small increments, stay at or below your load manual's published maximum, and
+            watch for pressure signs as you go. These are automatic statistical observations, not a safety
+            verdict — never load based on velocity data alone.
+          </p>
+        </div>
+      </div>
 
       {usable.length === 1 && (
         <p className="mt-1 text-center font-mono text-[10px] text-slate-600">
