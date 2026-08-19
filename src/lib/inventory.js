@@ -129,28 +129,29 @@ export function isBrassNearingRetirement(row) {
   return row.reload_cycles != null && row.cycles_used != null && row.cycles_used >= row.reload_cycles;
 }
 
-// --- Automated deduction on Save to Vault -----------------------------
+// --- Automated deduction on logging a Loading Session ------------------
 //
-// Range-day shot counts are inherently a little fuzzy (sighters, warm-up
-// rounds, shots that never got chrono'd) — so deduction is built around a
-// single editable "Total Rounds Fired" number the user confirms at save
-// time, defaulted from the velocity log but not required to match it, and
-// a preview of exactly what will change *before* anything is written. See
-// computeSessionDeduction (pure, for the preview) and
-// applySessionDeduction (the actual write) below, both used from
-// Dashboard's Save to Vault flow.
+// Components get used up when a batch is actually LOADED, not when it's
+// fired — see supabase/schema_batches.sql for the full reasoning (loading
+// and shooting are two separate events, since a batch might sit loaded
+// for weeks before any of it gets fired, and a single range day might
+// only fire part of one). So this deduction now runs off "Rounds Loaded"
+// on Dashboard's "Log a Loading Session" panel (previously it ran off
+// "Total Rounds Fired" on the range-session save — renamed from
+// computeSessionDeduction/applySessionDeduction accordingly). A preview
+// of exactly what will change is shown *before* anything is written.
 //
-// Brass is handled differently from powder/bullet/primer: firing a round
-// doesn't reduce how many cases you physically own (you pick them back up
-// to reload), so deduction doesn't touch a brass row's Qty On Hand at
-// all — instead it increments a `cycles_used` counter, compared against
-// that row's own `reload_cycles` estimate to flag a batch nearing
-// retirement (see isBrassNearingRetirement above).
+// Brass is handled differently from powder/bullet/primer: loading a round
+// doesn't reduce how many cases you physically own (you still have the
+// brass — it's the powder/bullet/primer that get consumed) — instead it
+// increments a `cycles_used` counter, compared against that row's own
+// `reload_cycles` estimate to flag a batch nearing retirement (see
+// isBrassNearingRetirement above).
 
 export const GRAINS_PER_LB = 7000;
 
 /** Pure preview calculation — no network calls, safe to recompute on every
- * keystroke of the Rounds Fired field. `recipeComponents` is
+ * keystroke of the Rounds Loaded field. `recipeComponents` is
  * { powderId, powderLabel, chargeGrains, bulletId, bulletLabel, primerId,
  * primerLabel, brassId, brassLabel } (see mapRecipeRow in recipes.js).
  * `inventoryMap` is from fetchUserInventoryMap (component_id -> row).
@@ -160,9 +161,9 @@ export const GRAINS_PER_LB = 7000;
  * `tracked: false` means there's nothing to write for that line (no
  * inventory row at all, or — for consume lines only — no Qty On Hand
  * set) — those lines still show in the preview so it's obvious nothing
- * will happen for them, but are skipped by applySessionDeduction. */
-export function computeSessionDeduction(recipeComponents, inventoryMap, roundsFired) {
-  const rounds = Number(roundsFired);
+ * will happen for them, but are skipped by applyBatchDeduction. */
+export function computeBatchDeduction(recipeComponents, inventoryMap, roundsLoaded) {
+  const rounds = Number(roundsLoaded);
   if (!Number.isFinite(rounds) || rounds <= 0) return [];
 
   const lines = [];
@@ -224,11 +225,11 @@ export function computeSessionDeduction(recipeComponents, inventoryMap, roundsFi
 }
 
 /** Actually write the deduction — only the `tracked: true` lines from
- * computeSessionDeduction have anything to update. Best-effort per line
+ * computeBatchDeduction have anything to update. Best-effort per line
  * (one failed row doesn't roll back the others, since this always runs
- * after the range session itself already saved successfully — losing a
- * stock update shouldn't make it look like the session wasn't logged). */
-export async function applySessionDeduction(userId, lines) {
+ * after the load_batches row itself already saved successfully — losing a
+ * stock update shouldn't make it look like the batch wasn't logged). */
+export async function applyBatchDeduction(userId, lines) {
   const trackedLines = (lines || []).filter((l) => l.tracked);
   const results = await Promise.allSettled(
     trackedLines.map((line) => {

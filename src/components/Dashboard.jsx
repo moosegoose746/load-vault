@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Save, Share2 } from 'lucide-react';
+import { AlertTriangle, Boxes, Save, Share2 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import RecipeChecklist from './RecipeChecklist.jsx';
@@ -7,12 +7,18 @@ import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
 import ChronoImport from './ChronoImport.jsx';
 import { useSync } from '../context/SyncContext.jsx';
-import { createRangeSession } from '../lib/recipes.js';
+import { createLoadBatch, createRangeSession } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
-import { applySessionDeduction, computeSessionDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
+import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
+//
+// Two separate events live here, deliberately not conflated (see
+// supabase/schema_batches.sql): a Loading Session (assembling a batch of
+// ammo — THIS is what consumes components) and a Range Session (shooting
+// some of what's already loaded — this just draws down Rounds On Hand,
+// it doesn't touch component stock).
 export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange }) {
   const [target, setTarget] = useState({ imageEl: null, imageBlob: null, shots: [], moa: null, groupInches: null });
   const [chronoShots, setChronoShots] = useState(null);
@@ -21,16 +27,20 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [saveError, setSaveError] = useState('');
 
-  // Auto-deduct-on-save: a separate, editable "Total Rounds Fired" count
-  // (NOT the same as the number of chrono'd shots — plenty of range days
-  // include sighters/warm-ups that never got a velocity reading, or shots
-  // that just weren't logged), a per-session opt-out, and the fetched
-  // inventory rows needed to preview the deduction before it's written.
-  const [inventoryMap, setInventoryMap] = useState({});
+  // Range Session's "Rounds Fired" is just a record of how many rounds
+  // were actually shot today (drawing down Rounds On Hand) — separate
+  // from the number of chrono'd shots, since plenty of range days include
+  // sighters/warm-ups that never got a velocity reading.
   const [roundsFired, setRoundsFired] = useState('');
   const [roundsFiredEdited, setRoundsFiredEdited] = useState(false);
-  const [deductEnabled, setDeductEnabled] = useState(true);
-  const [deductionResult, setDeductionResult] = useState(null); // { succeeded, failed } after a save
+
+  // Loading Session state — logging a batch actually assembles ammo and
+  // is what triggers component deduction (see computeBatchDeduction/
+  // applyBatchDeduction below).
+  const [inventoryMap, setInventoryMap] = useState({});
+  const [roundsLoaded, setRoundsLoaded] = useState('');
+  const [batchNotes, setBatchNotes] = useState('');
+  const [batchStatus, setBatchStatus] = useState('idle'); // idle | saving | saved | error
 
   const isRealRecipe = Boolean(activeRecipeId);
 
@@ -52,9 +62,9 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const displayShots = chronoShots && chronoShots.length ? chronoShots : recipe.shots;
 
   // Fetch the signed-in user's inventory once per real recipe so the
-  // deduction preview has something to compute against. Not fetched at all
-  // for the demo recipe (isRealRecipe false) since there's no real
-  // component id to match against anyway.
+  // Loading Session deduction preview has something to compute against.
+  // Not fetched at all for the demo recipe (isRealRecipe false) since
+  // there's no real component id to match against anyway.
   useEffect(() => {
     if (!isRealRecipe || !authUser) {
       setInventoryMap({});
@@ -67,12 +77,14 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
   // Default Rounds Fired to however many shots are showing (chrono'd or
   // manually typed) — a reasonable starting guess — but never overwrite it
-  // once the user has actually touched the field themselves, and reset the
-  // "touched" flag whenever the active recipe changes so switching recipes
-  // doesn't carry over a stale count.
+  // once the user has actually touched the field themselves, and reset
+  // both this and the Loading Session form whenever the active recipe
+  // changes so switching recipes doesn't carry over stale values.
   useEffect(() => {
     setRoundsFiredEdited(false);
-    setDeductionResult(null);
+    setRoundsLoaded('');
+    setBatchNotes('');
+    setBatchStatus('idle');
   }, [activeRecipeId]);
 
   useEffect(() => {
@@ -96,10 +108,47 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     [recipe]
   );
 
-  const deductionPreview = useMemo(
-    () => (deductEnabled ? computeSessionDeduction(recipeComponents, inventoryMap, roundsFired) : []),
-    [deductEnabled, recipeComponents, inventoryMap, roundsFired]
+  const batchDeductionPreview = useMemo(
+    () => computeBatchDeduction(recipeComponents, inventoryMap, roundsLoaded),
+    [recipeComponents, inventoryMap, roundsLoaded]
   );
+
+  // A non-blocking heads-up, not an error — firing more than what's
+  // logged as loaded usually just means a loading session from before
+  // this feature existed, or ammo from outside the app.
+  const roundsFiredNum = Number(roundsFired);
+  const exceedsOnHand =
+    isRealRecipe &&
+    recipe.roundsOnHand != null &&
+    Number.isFinite(roundsFiredNum) &&
+    roundsFiredNum > recipe.roundsOnHand;
+
+  const handleLogBatch = async () => {
+    if (!authUser) return;
+    const rounds = Number(roundsLoaded);
+    if (!Number.isFinite(rounds) || rounds <= 0) {
+      setBatchStatus('error');
+      return;
+    }
+    setBatchStatus('saving');
+    try {
+      await createLoadBatch({ recipeId: activeRecipeId, userId: authUser.id, roundsLoaded: rounds, notes: batchNotes });
+
+      if (batchDeductionPreview.some((l) => l.tracked)) {
+        await applyBatchDeduction(authUser.id, batchDeductionPreview);
+        fetchUserInventoryMap(authUser.id).then(setInventoryMap).catch(() => {});
+      }
+
+      setRoundsLoaded('');
+      setBatchNotes('');
+      setBatchStatus('saved');
+      onSessionSaved?.(); // refetches the recipe, updating Rounds On Hand
+      setTimeout(() => setBatchStatus('idle'), 2000);
+    } catch (err) {
+      console.error('Failed to log loading session', err);
+      setBatchStatus('error');
+    }
+  };
 
   const handleSave = async () => {
     setSaveError('');
@@ -127,21 +176,11 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           extremeSpread: stats?.es ?? null,
           shots: chronoShots ?? [],
           imageBlob: target.imageBlob,
+          roundsFired: Number.isFinite(roundsFiredNum) && roundsFiredNum >= 0 ? roundsFiredNum : null,
         });
 
-        // Deduction happens AFTER the session itself is confirmed saved —
-        // if this part fails, the range session is still logged; only the
-        // inventory numbers might be stale, which is recoverable by hand.
-        if (deductEnabled && deductionPreview.some((l) => l.tracked)) {
-          const result = await applySessionDeduction(authUser.id, deductionPreview);
-          setDeductionResult(result);
-          fetchUserInventoryMap(authUser.id).then(setInventoryMap).catch(() => {});
-        } else {
-          setDeductionResult(null);
-        }
-
         setSaveState('saved');
-        onSessionSaved?.();
+        onSessionSaved?.(); // refetches the recipe, updating Rounds On Hand
         setTimeout(() => setSaveState('idle'), 2000);
       } catch (err) {
         console.error('Failed to save range session', err);
@@ -188,67 +227,60 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         ]}
       />
 
-      <div className="my-4 rounded border border-slate-800 bg-panel p-4">
-        <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
-          Target Analysis
-        </h2>
-        <TargetCalculator
-          distanceYards={recipe.distanceYards}
-          onStateChange={setTarget}
-          initialImageUrl={recipe.targetImageUrl}
-        />
-      </div>
-
-      <div className="mb-4">
-        <VelocityLog shots={displayShots} avgVelocity={displayAvgVelocity} />
-      </div>
-
-      <div className="mb-4">
-        <ChronoImport onImportComplete={setChronoShots} />
-      </div>
-
       {isRealRecipe && (
-        <div className="mb-4 rounded border border-slate-800 bg-panel p-4">
+        <div className="my-4 rounded border border-slate-800 bg-panel p-4">
           <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
             <Boxes size={14} />
-            Inventory Deduction
+            Log a Loading Session
           </h2>
           <p className="mb-3 text-xs text-slate-400">
-            How many rounds did you actually fire today? This can be different from the number of
-            chrono'd shots above — include sighters, warm-ups, or anything you didn't log a
-            velocity for. Powder/bullets/primers get subtracted from your on-hand stock; brass
-            instead logs firings against its estimated reload-cycle count, since you keep the
-            cases to reload.
+            Assembled a batch of this recipe at the bench? Log it here — this is what actually
+            consumes powder/bullets/primers from your inventory and counts firings against brass's
+            reload-cycle estimate. Currently{' '}
+            <span className="text-slate-200">
+              {recipe.roundsOnHand != null ? `${recipe.roundsOnHand} rounds` : 'an unknown amount'}
+            </span>{' '}
+            loaded and ready to shoot.
           </p>
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase text-slate-500">Total Rounds Fired</span>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col gap-1">
+              <span className="font-mono text-[10px] uppercase text-slate-500">Rounds Loaded</span>
               <input
                 type="number"
                 step="1"
-                min="0"
-                value={roundsFired}
-                onChange={(e) => {
-                  setRoundsFired(e.target.value);
-                  setRoundsFiredEdited(true);
-                }}
-                className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                min="1"
+                value={roundsLoaded}
+                onChange={(e) => setRoundsLoaded(e.target.value)}
+                className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
               />
             </label>
-            <label className="flex items-center gap-2 font-mono text-xs text-slate-300">
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="font-mono text-[10px] uppercase text-slate-500">Notes (optional)</span>
               <input
-                type="checkbox"
-                checked={deductEnabled}
-                onChange={(e) => setDeductEnabled(e.target.checked)}
-                className="h-4 w-4 accent-amber-500"
+                type="text"
+                value={batchNotes}
+                onChange={(e) => setBatchNotes(e.target.value)}
+                placeholder="e.g. lot #, bench notes"
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
               />
-              Deduct from my inventory on save
             </label>
+            <button
+              onClick={handleLogBatch}
+              disabled={batchStatus === 'saving' || !authUser}
+              className="flex items-center gap-1.5 rounded border border-amber-500 px-3 py-1.5 font-mono text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {batchStatus === 'saving' ? 'LOGGING…' : batchStatus === 'saved' ? 'LOGGED' : 'LOG BATCH'}
+            </button>
           </div>
+          {!authUser && (
+            <p className="mt-2 font-mono text-[11px] text-amber-400">
+              Sign in with a real account to log a loading session.
+            </p>
+          )}
 
-          {deductEnabled && deductionPreview.length > 0 && (
+          {batchDeductionPreview.length > 0 && (
             <div className="mt-3 flex flex-col gap-1 border-t border-slate-800 pt-3">
-              {deductionPreview.map((line) =>
+              {batchDeductionPreview.map((line) =>
                 line.kind === 'cycles' ? (
                   <p key={line.componentId} className="font-mono text-[11px] text-slate-400">
                     <span className="text-slate-200">{line.label}</span> (brass): +{line.totalAmount} firings
@@ -282,14 +314,56 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
             </div>
           )}
 
-          {deductionResult && (
-            <p className="mt-3 font-mono text-[11px] text-emerald-400">
-              Inventory updated for {deductionResult.succeeded} component
-              {deductionResult.succeeded === 1 ? '' : 's'}
-              {deductionResult.failed > 0 && (
-                <span className="text-red-400"> ({deductionResult.failed} failed to update)</span>
-              )}
-              .
+          {batchStatus === 'error' && (
+            <p className="mt-2 font-mono text-[11px] text-red-400">Enter a valid Rounds Loaded amount.</p>
+          )}
+        </div>
+      )}
+
+      <div className="my-4 rounded border border-slate-800 bg-panel p-4">
+        <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
+          Target Analysis
+        </h2>
+        <TargetCalculator
+          distanceYards={recipe.distanceYards}
+          onStateChange={setTarget}
+          initialImageUrl={recipe.targetImageUrl}
+        />
+      </div>
+
+      <div className="mb-4">
+        <VelocityLog shots={displayShots} avgVelocity={displayAvgVelocity} />
+      </div>
+
+      <div className="mb-4">
+        <ChronoImport onImportComplete={setChronoShots} />
+      </div>
+
+      {isRealRecipe && (
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded border border-slate-800 bg-panel p-4">
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase text-slate-500">Rounds Fired Today</span>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={roundsFired}
+              onChange={(e) => {
+                setRoundsFired(e.target.value);
+                setRoundsFiredEdited(true);
+              }}
+              className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+            />
+          </label>
+          <p className="max-w-md text-xs text-slate-400">
+            Draws down Rounds On Hand — doesn't touch your component stock, since those were
+            already used when you logged the loading session above.
+          </p>
+          {exceedsOnHand && (
+            <p className="flex items-center gap-1 font-mono text-[11px] text-amber-400">
+              <AlertTriangle size={12} />
+              More than your {recipe.roundsOnHand} rounds on hand — log a loading session if you
+              forgot to, or this may be ammo from outside the app.
             </p>
           )}
         </div>

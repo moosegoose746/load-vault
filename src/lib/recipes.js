@@ -76,18 +76,22 @@ function calculateCostPerRound(row, inventory) {
   return parts.reduce((sum, p) => sum + p, 0);
 }
 
-/** How many more complete rounds this recipe could be loaded with, given
- * the signed-in user's current Qty On Hand for whichever components they
- * actually track — bottlenecked by whichever tracked component would run
- * out first. Components with no saved Qty On Hand are simply skipped
- * (unknown, not zero) rather than forcing the whole estimate to `null` —
- * unlike cost-per-round, a partial answer ("at least 40, limited by
- * primers") is still useful even if powder isn't tracked yet. Returns
- * `{ roundsRemaining: null, bottleneck: null }` if nothing on this recipe
- * is tracked at all. Brass uses its Qty On Hand (case count) here, same
- * as everything else — separate from cycles_used/reload_cycles, which is
- * about a batch of brass wearing out, not how many cases exist. */
-function calculateRoundsRemaining(row, inventory) {
+/** How many more complete rounds this recipe could be LOADED from raw
+ * component stock — bottlenecked by whichever tracked component would run
+ * out first. Deliberately NOT called "rounds remaining"/"on hand" (an
+ * earlier version of this was) since that reads as "rounds you already
+ * have loaded and ready to shoot," which is a totally different number —
+ * see `roundsOnHand`/`fetchRoundsOnHand` below for that one. This is
+ * purely a raw-materials capacity estimate. Components with no saved Qty
+ * On Hand are simply skipped (unknown, not zero) rather than forcing the
+ * whole estimate to `null` — unlike cost-per-round, a partial answer ("at
+ * least 40, limited by primers") is still useful even if powder isn't
+ * tracked yet. Returns `{ loadableFromStock: null, loadableBottleneck:
+ * null }` if nothing on this recipe is tracked at all. Brass uses its Qty
+ * On Hand (case count) here, same as everything else — separate from
+ * cycles_used/reload_cycles, which is about a batch of brass wearing out,
+ * not how many cases exist. */
+function calculateLoadableFromStock(row, inventory) {
   const parts = [];
   const add = (component, label, perRoundAmount) => {
     if (!component || !(perRoundAmount > 0)) return;
@@ -100,12 +104,48 @@ function calculateRoundsRemaining(row, inventory) {
   add(row.primer, `${row.primer?.brand} ${row.primer?.model}`, 1);
   add(row.brass, `${row.brass?.brand} ${row.brass?.model}`, 1);
 
-  if (!parts.length) return { roundsRemaining: null, bottleneck: null };
+  if (!parts.length) return { loadableFromStock: null, loadableBottleneck: null };
   const min = parts.reduce((a, b) => (b.rounds < a.rounds ? b : a));
-  return { roundsRemaining: min.rounds, bottleneck: min.label };
+  return { loadableFromStock: min.rounds, loadableBottleneck: min.label };
 }
 
-function mapRecipeRow(row, session, shots, inventory) {
+/** How many rounds of this recipe are currently loaded and sitting ready
+ * to shoot — SUM(load_batches.rounds_loaded) - SUM(range_sessions.
+ * rounds_fired) for this recipe. Deliberately computed fresh each time
+ * rather than stored as a mutable running counter, so it can never drift
+ * out of sync with the actual batch/session history (see
+ * supabase/schema_batches.sql). Clamped at 0 — if more has been fired
+ * than was ever logged as loaded (e.g. a loading session from before this
+ * feature existed, or factory ammo fired under this recipe by mistake),
+ * that's a real discrepancy worth noticing, but this number just floors
+ * at zero rather than going negative. */
+export async function fetchRoundsOnHand(recipeId) {
+  const [{ data: batches, error: batchError }, { data: sessions, error: sessionError }] = await Promise.all([
+    supabase.from('load_batches').select('rounds_loaded').eq('recipe_id', recipeId),
+    supabase.from('range_sessions').select('rounds_fired').eq('recipe_id', recipeId),
+  ]);
+  if (batchError) throw batchError;
+  if (sessionError) throw sessionError;
+  const totalLoaded = (batches || []).reduce((sum, b) => sum + (b.rounds_loaded || 0), 0);
+  const totalFired = (sessions || []).reduce((sum, s) => sum + (s.rounds_fired || 0), 0);
+  return Math.max(0, totalLoaded - totalFired);
+}
+
+/** Log a Loading Session — a batch of `roundsLoaded` rounds of this
+ * recipe actually assembled at the bench. This is what should trigger
+ * component deduction (see computeBatchDeduction/applyBatchDeduction in
+ * lib/inventory.js), NOT firing a round at the range. */
+export async function createLoadBatch({ recipeId, userId, roundsLoaded, notes }) {
+  const { data, error } = await supabase
+    .from('load_batches')
+    .insert({ recipe_id: recipeId, user_id: userId, rounds_loaded: roundsLoaded, notes: notes || null })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+function mapRecipeRow(row, session, shots, inventory, roundsOnHand) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
   return {
     id: row.id,
@@ -118,9 +158,9 @@ function mapRecipeRow(row, session, shots, inventory) {
     primer: componentLabel(row.primer),
     brass: componentLabel(row.brass),
     // Raw component ids, kept alongside the display-label strings above, so
-    // the Save-to-Vault flow can look each one up in the user's own
+    // the Log a Loading Session flow can look each one up in the user's own
     // user_inventory rows for auto-deduction (see
-    // computeSessionDeduction/applySessionDeduction in lib/inventory.js).
+    // computeBatchDeduction/applyBatchDeduction in lib/inventory.js).
     // Not needed by anything that only renders the recipe (Sidebar etc.),
     // just by the deduction feature in Dashboard.
     powderId: row.powder?.id ?? null,
@@ -135,7 +175,12 @@ function mapRecipeRow(row, session, shots, inventory) {
     extremeSpread: session?.extreme_spread_fps ?? null,
     targetImageUrl: session?.target_image_url ?? null,
     costPerRound: calculateCostPerRound(row, inventory),
-    ...calculateRoundsRemaining(row, inventory),
+    ...calculateLoadableFromStock(row, inventory),
+    // How many rounds of this recipe are currently loaded & ready to
+    // shoot — see fetchRoundsOnHand above. `undefined` (not fetched, e.g.
+    // no recipeId yet) renders the same as `null` (nothing logged) in the
+    // UI, both show as "—".
+    roundsOnHand: roundsOnHand ?? null,
     shots: shots ?? [],
   };
 }
@@ -190,8 +235,9 @@ export async function fetchRecipeDetail(recipeId, userId) {
   }
 
   const inventory = userId ? await fetchUserInventoryMap(userId) : {};
+  const roundsOnHand = await fetchRoundsOnHand(recipeId);
 
-  return mapRecipeRow(row, latestSession, shots, inventory);
+  return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand);
 }
 
 /** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
@@ -248,7 +294,11 @@ async function uploadTargetImage(blob, userId) {
  * provided, + a target photo upload if a *newly uploaded* image is passed —
  * `imageBlob` is only set when the user picked a new photo this session; a
  * photo restored from a previous session isn't re-uploaded, see
- * TargetCalculator.jsx). */
+ * TargetCalculator.jsx). `roundsFired` — how many rounds were actually
+ * shot today, separate from how many got a chrono reading — is persisted
+ * so it can draw down `roundsOnHand` (see fetchRoundsOnHand above); unlike
+ * the old behavior, saving a range session no longer deducts raw
+ * component stock on its own (see supabase/schema_batches.sql). */
 export async function createRangeSession({
   recipeId,
   userId,
@@ -260,6 +310,7 @@ export async function createRangeSession({
   extremeSpread,
   shots,
   imageBlob,
+  roundsFired,
 }) {
   let targetImageUrl = null;
   if (imageBlob) {
@@ -284,6 +335,7 @@ export async function createRangeSession({
       std_dev_fps: stdDevFps,
       extreme_spread_fps: extremeSpread,
       target_image_url: targetImageUrl,
+      rounds_fired: roundsFired ?? null,
     })
     .select()
     .single();

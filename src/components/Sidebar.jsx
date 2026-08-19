@@ -117,10 +117,14 @@ export default function Sidebar({
           value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}
         />
         <SpecRow
-          label="Rounds Remaining"
+          label="Loaded & Ready"
+          value={recipe.roundsOnHand != null ? `${recipe.roundsOnHand} rounds` : '—'}
+        />
+        <SpecRow
+          label="Loadable From Stock"
           value={
-            recipe.roundsRemaining != null
-              ? `${recipe.roundsRemaining} (${recipe.bottleneck})`
+            recipe.loadableFromStock != null
+              ? `${recipe.loadableFromStock} (${recipe.loadableBottleneck})`
               : '—'
           }
         />
