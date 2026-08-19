@@ -95,23 +95,20 @@ export default function Sidebar({
           ))}
       </div>
 
-      <div className="flex flex-col gap-1">
-        <h2 className="mb-1 font-mono text-xs uppercase tracking-widest text-amber-400">
+      <div className="flex flex-col rounded border border-slate-800 bg-panel p-3">
+        <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">
           Component Specs
         </h2>
         <SpecRow label="Caliber" value={recipe.caliber} />
         <SpecRow label="Powder" value={recipe.powder} />
         <SpecRow label="Bullet" value={recipe.bullet} />
-      </div>
-
-      <div className="flex flex-col rounded border border-slate-800 bg-panel p-3">
-        <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">
-          Specs Summary
-        </h2>
         <SpecRow label="Charge Weight" value={`${recipe.chargeGrains ?? '—'} gr ${recipe.powder}`} />
         <SpecRow label="COAL" value={recipe.coalInches ? `${recipe.coalInches}"` : '—'} />
         <SpecRow label="Primer" value={recipe.primer} />
         <SpecRow label="Brass" value={recipe.brass} />
+
+        <div className="my-2 border-t border-slate-800" />
+
         <SpecRow
           label="Cost / Round"
           value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : '—'}

@@ -292,8 +292,13 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         ))}
       </div>
 
-      {dashboardTab === 'overview' && (
-        <div className="flex flex-col gap-4">
+      {/* Each tab's content stays mounted the whole time and is just
+          hidden via CSS when another tab is active, rather than being
+          conditionally rendered/unmounted — TargetCalculator and
+          ChronoImport hold real local state (the loaded photo, plotted
+          shots, calibration) that would otherwise be lost every time you
+          switched away from Range Day and back. */}
+      <div className={dashboardTab === 'overview' ? 'flex flex-col gap-4' : 'hidden'}>
           <div className="grid grid-cols-3 gap-3">
             <MetricCard value={displayAvgVelocity} unit="FPS" label="Avg FPS" />
             <MetricCard value={displayStdDevFps} unit="FPS" label="FPS SD" />
@@ -314,10 +319,9 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
             </p>
           )}
         </div>
-      )}
 
-      {dashboardTab === 'loading' && isRealRecipe && (
-        <div className="rounded border border-slate-800 bg-panel p-4">
+      {isRealRecipe && (
+        <div className={dashboardTab === 'loading' ? 'rounded border border-slate-800 bg-panel p-4' : 'hidden'}>
           <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
             <Boxes size={14} />
             Log a Loading Session
@@ -421,8 +425,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         </div>
       )}
 
-      {dashboardTab === 'range' && (
-        <div className="flex flex-col gap-4">
+      <div className={dashboardTab === 'range' ? 'flex flex-col gap-4' : 'hidden'}>
           <div className="rounded border border-slate-800 bg-panel p-4">
             <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
               Target Analysis
@@ -517,8 +520,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
             )}
             {saveError && <span className="font-mono text-[11px] text-red-400">{saveError}</span>}
           </div>
-        </div>
-      )}
+      </div>
 
       <TargetExportModal
         open={exportOpen}
@@ -527,6 +529,9 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         shots={target.shots}
         moa={target.moa}
         recipe={recipe}
+        avgVelocity={displayAvgVelocity}
+        stdDevFps={displayStdDevFps}
+        extremeSpread={displayExtremeSpread}
       />
     </main>
   );

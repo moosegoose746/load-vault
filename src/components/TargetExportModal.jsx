@@ -28,7 +28,17 @@ function truncateText(ctx, text, maxWidth) {
   return `${truncated}…`;
 }
 
-export default function TargetExportModal({ open, onClose, imageEl, shots, moa, recipe }) {
+export default function TargetExportModal({
+  open,
+  onClose,
+  imageEl,
+  shots,
+  moa,
+  recipe,
+  avgVelocity,
+  stdDevFps,
+  extremeSpread,
+}) {
   const canvasRef = useRef(null);
   const qrImgRef = useRef(null);
   const [qrReady, setQrReady] = useState(false);
@@ -100,10 +110,15 @@ export default function TargetExportModal({ open, onClose, imageEl, shots, moa, 
     const statsWidth = EXPORT_SIZE - statsX - 24;
     ctx.strokeStyle = '#334155';
     ctx.strokeRect(statsX, 24, statsWidth, HEADER_HEIGHT - 48);
+    // Prefer whatever's live this session (a chrono import/manual entry
+    // not yet saved to a range session) over the recipe's last-saved
+    // numbers, same as the HUD cards on the Overview tab — otherwise this
+    // card would show stale/blank stats right after importing a chrono
+    // file but before hitting Save.
     const stats = [
-      { label: 'AVG FPS', value: recipe.avgVelocity },
-      { label: 'FPS SD', value: recipe.stdDevFps },
-      { label: 'FPS ES', value: recipe.extremeSpread },
+      { label: 'AVG FPS', value: avgVelocity ?? recipe.avgVelocity },
+      { label: 'FPS SD', value: stdDevFps ?? recipe.stdDevFps },
+      { label: 'FPS ES', value: extremeSpread ?? recipe.extremeSpread },
     ];
     const colWidth = statsWidth / 3;
     ctx.textAlign = 'center';
@@ -191,7 +206,7 @@ export default function TargetExportModal({ open, onClose, imageEl, shots, moa, 
         return URL.createObjectURL(blob);
       });
     }, 'image/png');
-  }, [open, imageEl, shots, moa, recipe, qrReady]);
+  }, [open, imageEl, shots, moa, recipe, avgVelocity, stdDevFps, extremeSpread, qrReady]);
 
   if (!open) return null;
 
