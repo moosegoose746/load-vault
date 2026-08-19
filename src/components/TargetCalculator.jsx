@@ -13,10 +13,15 @@ const REFERENCE_INCHES = 1; // "mark a 1-inch reference distance" per Section 5B
 // coordinates, a touch magnifier loupe for precise mobile dot placement,
 // and live MOA math. Client-side WebP compression (Section 5A) runs on
 // upload before anything is held in memory or (later) sent to Supabase.
-export default function TargetCalculator({ distanceYards = 100, onStateChange }) {
+export default function TargetCalculator({ distanceYards = 100, onStateChange, initialImageUrl }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
   const loupeCanvasRef = useRef(null);
+  // The compressed Blob for whatever's currently loaded — only set when the
+  // user picks a NEW photo this session (not when a saved photo is
+  // restored from initialImageUrl below), so Dashboard's save handler only
+  // re-uploads a photo when there's actually a new one to upload.
+  const imageBlobRef = useRef(null);
 
   const [imageLoaded, setImageLoaded] = useState(false);
   const [mode, setMode] = useState('shots'); // 'shots' | 'calibrate'
@@ -78,11 +83,32 @@ export default function TargetCalculator({ distanceYards = 100, onStateChange })
   }, [draw, imageLoaded]);
 
   useEffect(() => {
-    onStateChange?.({ imageEl: imgRef.current, shots, moa, groupInches });
+    onStateChange?.({ imageEl: imgRef.current, imageBlob: imageBlobRef.current, shots, moa, groupInches });
     // imgRef.current only changes when a new image finishes loading, which
     // also flips imageLoaded — included below so this fires at that point too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shots, moa, groupInches, imageLoaded]);
+
+  // Restore a previously-saved target photo (from the recipe's most recent
+  // range session) when one exists and nothing's been loaded yet this
+  // session. Only ever runs once per mount — if the user then replaces it
+  // with a new upload, this shouldn't fire again just because a re-render
+  // happens to pass the same initialImageUrl down again.
+  useEffect(() => {
+    if (!initialImageUrl || imageLoaded) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // needed so the canvas stays exportable (Share Recipe) — the storage bucket is public
+    img.onload = () => {
+      imgRef.current = img;
+      imageBlobRef.current = null; // a restored photo, not a fresh upload — don't re-upload it verbatim on save
+      setImageLoaded(true);
+    };
+    img.onerror = () => {
+      console.warn('Failed to load saved target image', initialImageUrl);
+    };
+    img.src = initialImageUrl;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialImageUrl]);
 
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
@@ -92,6 +118,7 @@ export default function TargetCalculator({ distanceYards = 100, onStateChange })
     const img = new Image();
     img.onload = () => {
       imgRef.current = img;
+      imageBlobRef.current = compressed;
       setShots([]);
       setCalibration({ a: null, b: null });
       setImageLoaded(true);

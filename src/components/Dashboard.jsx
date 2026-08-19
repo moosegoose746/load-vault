@@ -13,7 +13,7 @@ import { computeVelocityStats } from '../lib/stats.js';
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
 export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange }) {
-  const [target, setTarget] = useState({ imageEl: null, shots: [], moa: null, groupInches: null });
+  const [target, setTarget] = useState({ imageEl: null, imageBlob: null, shots: [], moa: null, groupInches: null });
   const [chronoShots, setChronoShots] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
   const { saveSession, pendingCount, status } = useSync();
@@ -64,6 +64,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           stdDevFps: stats?.sd ?? null,
           extremeSpread: stats?.es ?? null,
           shots: chronoShots ?? [],
+          imageBlob: target.imageBlob,
         });
         setSaveState('saved');
         onSessionSaved?.();
@@ -117,7 +118,11 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
           Target Analysis
         </h2>
-        <TargetCalculator distanceYards={recipe.distanceYards} onStateChange={setTarget} />
+        <TargetCalculator
+          distanceYards={recipe.distanceYards}
+          onStateChange={setTarget}
+          initialImageUrl={recipe.targetImageUrl}
+        />
       </div>
 
       <div className="mb-4">

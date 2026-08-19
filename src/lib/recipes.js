@@ -36,7 +36,7 @@ export async function fetchUserRecipes(userId) {
   return data;
 }
 
-function mapRecipeRow(row, session) {
+function mapRecipeRow(row, session, shots) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
   return {
     id: row.id,
@@ -54,12 +54,18 @@ function mapRecipeRow(row, session) {
     avgVelocity: session?.avg_velocity_fps ?? null,
     stdDevFps: session?.std_dev_fps ?? null,
     extremeSpread: session?.extreme_spread_fps ?? null,
+    targetImageUrl: session?.target_image_url ?? null,
     costPerRound: null, // wired up in a later phase (Cost-Per-Round calculator)
-    shots: [], // Phase 6+: pull from shot_logs if the per-shot list is needed on-screen
+    shots: shots ?? [],
   };
 }
 
-/** Fetch one recipe, joined with its component names and its most recent range session. */
+/** Fetch one recipe, joined with its component names, its most recent range
+ * session, and that session's per-shot velocity log. Note: only the target
+ * *photo* is restorable — the individual shot-hole coordinates plotted on
+ * the canvas aren't persisted anywhere in the schema (no column for them),
+ * so reopening a saved recipe shows the saved photo but not the shot
+ * markers on it; re-plotting starts fresh on top of the restored photo. */
 export async function fetchRecipeDetail(recipeId) {
   const { data: row, error } = await supabase
     .from('load_recipes')
@@ -85,7 +91,19 @@ export async function fetchRecipeDetail(recipeId) {
     .limit(1);
   if (sessionError) throw sessionError;
 
-  return mapRecipeRow(row, sessions?.[0]);
+  const latestSession = sessions?.[0];
+  let shots = [];
+  if (latestSession) {
+    const { data: shotRows, error: shotError } = await supabase
+      .from('shot_logs')
+      .select('velocity_fps')
+      .eq('session_id', latestSession.id)
+      .order('shot_number', { ascending: true });
+    if (shotError) throw shotError;
+    shots = (shotRows || []).map((r) => r.velocity_fps);
+  }
+
+  return mapRecipeRow(row, latestSession, shots);
 }
 
 /** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
@@ -120,7 +138,29 @@ export async function createRecipe(fields, userId) {
   return data;
 }
 
-/** Create a real range_sessions row (+ shot_logs, if velocity readings are provided). */
+/** Upload a compressed target-photo Blob to Supabase Storage and return its
+ * public URL. Stored under `${userId}/<timestamp>.webp` in the
+ * `target-images` bucket, which is public-read / authenticated-write (see
+ * "STORAGE BUCKET SECURITY" in supabase/schema.sql) — a trigger on
+ * range_sessions already cleans up the old file whenever a session's
+ * target_image_url changes or the session is deleted, so this doesn't need
+ * to worry about orphaned files itself. */
+async function uploadTargetImage(blob, userId) {
+  const path = `${userId}/${Date.now()}.webp`;
+  const { error } = await supabase.storage.from('target-images').upload(path, blob, {
+    contentType: 'image/webp',
+    upsert: false,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from('target-images').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/** Create a real range_sessions row (+ shot_logs, if velocity readings are
+ * provided, + a target photo upload if a *newly uploaded* image is passed —
+ * `imageBlob` is only set when the user picked a new photo this session; a
+ * photo restored from a previous session isn't re-uploaded, see
+ * TargetCalculator.jsx). */
 export async function createRangeSession({
   recipeId,
   userId,
@@ -131,7 +171,19 @@ export async function createRangeSession({
   stdDevFps,
   extremeSpread,
   shots,
+  imageBlob,
 }) {
+  let targetImageUrl = null;
+  if (imageBlob) {
+    try {
+      targetImageUrl = await uploadTargetImage(imageBlob, userId);
+    } catch (err) {
+      // Don't let a failed photo upload block saving the actual range
+      // data — log it and just save without a photo this time.
+      console.error('Failed to upload target image', err);
+    }
+  }
+
   const { data: session, error } = await supabase
     .from('range_sessions')
     .insert({
@@ -143,6 +195,7 @@ export async function createRangeSession({
       avg_velocity_fps: avgVelocity != null ? Math.round(avgVelocity) : null,
       std_dev_fps: stdDevFps,
       extreme_spread_fps: extremeSpread,
+      target_image_url: targetImageUrl,
     })
     .select()
     .single();
