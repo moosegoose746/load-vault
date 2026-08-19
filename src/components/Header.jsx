@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Crosshair, LogOut, Menu, Sun, X } from 'lucide-react';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
+import { useSync } from '../context/SyncContext.jsx';
 
 // Section 3: "Hero Header / Navigation Bar — Amber/gold logo, Sync Status
 // Badge, Range Mode Toggle, and Mobile Navigation."
 export default function Header({ user, onSignOut }) {
   const { rangeMode, toggleRangeMode } = useRangeMode();
+  const { status: syncStatus } = useSync();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -21,7 +23,7 @@ export default function Header({ user, onSignOut }) {
 
         {/* Desktop controls */}
         <div className="hidden items-center gap-3 sm:flex">
-          <SyncStatusBadge status="synced" />
+          <SyncStatusBadge status={syncStatus} />
           <button
             onClick={toggleRangeMode}
             aria-pressed={rangeMode}
@@ -57,7 +59,7 @@ export default function Header({ user, onSignOut }) {
 
       {mobileOpen && (
         <div className="flex flex-col gap-3 border-t border-slate-800 px-4 py-3 sm:hidden">
-          <SyncStatusBadge status="synced" />
+          <SyncStatusBadge status={syncStatus} />
           <button
             onClick={toggleRangeMode}
             aria-pressed={rangeMode}

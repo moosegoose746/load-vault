@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from './hooks/useAuth.js';
 import { RangeModeProvider, useRangeMode } from './context/RangeModeContext.jsx';
+import { SyncProvider } from './context/SyncContext.jsx';
 import Header from './components/Header.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './components/Dashboard.jsx';
@@ -113,7 +114,9 @@ function AppShell() {
 export default function App() {
   return (
     <RangeModeProvider>
-      <AppShell />
+      <SyncProvider>
+        <AppShell />
+      </SyncProvider>
     </RangeModeProvider>
   );
 }

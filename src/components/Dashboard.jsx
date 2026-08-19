@@ -5,12 +5,31 @@ import VelocityLog from './VelocityLog.jsx';
 import RecipeChecklist from './RecipeChecklist.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
+import ChronoImport from './ChronoImport.jsx';
+import { useSync } from '../context/SyncContext.jsx';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
 export default function Dashboard({ recipe }) {
   const [target, setTarget] = useState({ imageEl: null, shots: [], moa: null, groupInches: null });
   const [exportOpen, setExportOpen] = useState(false);
+  const { saveSession, pendingCount, status } = useSync();
+  const [justSaved, setJustSaved] = useState(false);
+
+  const handleSave = async () => {
+    await saveSession({
+      title: recipe.title,
+      distanceYards: recipe.distanceYards,
+      moa: target.moa,
+      groupInches: target.groupInches,
+      shotCount: target.shots.length,
+      avgVelocity: recipe.avgVelocity,
+      stdDevFps: recipe.stdDevFps,
+      extremeSpread: recipe.extremeSpread,
+    });
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2000);
+  };
 
   return (
     <main className="flex-1 p-4">
@@ -45,10 +64,17 @@ export default function Dashboard({ recipe }) {
         <VelocityLog shots={recipe.shots} avgVelocity={recipe.avgVelocity} />
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10">
+      <div className="mb-4">
+        <ChronoImport />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-2 rounded border border-amber-500 px-4 py-2 font-mono text-xs text-amber-400 hover:bg-amber-500/10"
+        >
           <Save size={14} />
-          SAVE TO VAULT
+          {justSaved ? 'SAVED' : 'SAVE TO VAULT'}
         </button>
         <button
           onClick={() => setExportOpen(true)}
@@ -57,6 +83,13 @@ export default function Dashboard({ recipe }) {
           <Share2 size={14} />
           SHARE RECIPE
         </button>
+        {pendingCount > 0 && (
+          <span className="font-mono text-[11px] text-slate-500">
+            {status === 'syncing' ? 'Syncing' : 'Queued'} {pendingCount} session
+            {pendingCount === 1 ? '' : 's'}
+            {status === 'queued' ? ' — will sync when back online' : '…'}
+          </span>
+        )}
       </div>
 
       <TargetExportModal
