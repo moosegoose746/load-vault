@@ -94,7 +94,11 @@ function AppShell() {
   const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
   const loading = DEV_SKIP_AUTH ? false : auth.loading;
 
-  const [view, setView] = useState('vault'); // 'vault' | 'inventory' | 'firearms'
+  const [view, setView] = useState('vault'); // 'vault' | 'inventory' | 'firearms' | 'workups'
+  // Deep-link target for the Workups page — set when a recipe's Overview
+  // tab's "Part of a Load Workup" card is clicked (see Dashboard.jsx),
+  // consumed once by WorkupsPage then cleared.
+  const [pendingWorkupId, setPendingWorkupId] = useState(null);
   const [userRecipes, setUserRecipes] = useState([]);
   const [activeRecipeId, setActiveRecipeId] = useState(null); // null = demo recipe
   const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
@@ -233,7 +237,11 @@ function AppShell() {
             }}
           />
         ) : view === 'workups' ? (
-          <WorkupsPage authUser={auth.user} />
+          <WorkupsPage
+            authUser={auth.user}
+            initialOpenWorkupId={pendingWorkupId}
+            onInitialWorkupOpened={() => setPendingWorkupId(null)}
+          />
         ) : (
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar
@@ -253,6 +261,10 @@ function AppShell() {
               authUser={auth.user}
               onSessionSaved={handleRecipeDataChanged}
               onTargetChange={setLiveMoa}
+              onOpenWorkup={(workupId) => {
+                setPendingWorkupId(workupId);
+                setView('workups');
+              }}
             />
           </div>
         )

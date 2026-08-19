@@ -555,12 +555,24 @@ function WorkupCard({ workup, onOpen }) {
 // create a Workup, add rungs, see them in a table — the
 // charge-weight-vs-velocity chart (with a fitted trend line and
 // individual shot dots) is a follow-up slice on top of this same data.
-export default function WorkupsPage({ authUser }) {
+export default function WorkupsPage({ authUser, initialOpenWorkupId, onInitialWorkupOpened }) {
   const [workups, setWorkups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [openWorkupId, setOpenWorkupId] = useState(null);
+
+  // Deep-link support — a recipe's Overview tab can jump straight into a
+  // specific Workup (see Dashboard.jsx's "Part of a Load Workup" card)
+  // without the user having to find it in the list themselves. Consumed
+  // once via onInitialWorkupOpened so navigating away and back to Workups
+  // normally doesn't keep re-opening it.
+  useEffect(() => {
+    if (!initialOpenWorkupId) return;
+    setOpenWorkupId(initialOpenWorkupId);
+    onInitialWorkupOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenWorkupId]);
 
   const reloadList = () => {
     if (!authUser) {

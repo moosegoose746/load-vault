@@ -178,6 +178,31 @@ export async function deleteWorkupRung(rungId) {
   if (error) throw error;
 }
 
+/** Find the (at most one) Workup whose fixed component set EXACTLY
+ * matches a recipe's own — the strict "all components must match" rule
+ * the user chose for what counts as the same ladder family (see the
+ * design-decisions note in the progress log). Null fields have to match
+ * null-for-null too, not just get skipped, since two recipes that are
+ * BOTH missing a bullet aren't necessarily the same load — `.is()` is
+ * used instead of `.eq()` for those so Postgres compares them correctly
+ * (a plain `.eq('bullet_id', null)` silently matches nothing). Used to
+ * power the "this recipe is part of a Workup" card on a recipe's
+ * Overview tab — see Dashboard.jsx. Returns `{ id, title }` or null;
+ * never throws for "no match," only for a real query failure. */
+export async function fetchMatchingWorkup(userId, { caliberId, powderId, bulletId, primerId, brassId }) {
+  if (!userId || !caliberId) return null;
+
+  let query = supabase.from('load_workups').select('id, title').eq('user_id', userId).eq('caliber_id', caliberId);
+  query = powderId ? query.eq('powder_id', powderId) : query.is('powder_id', null);
+  query = bulletId ? query.eq('bullet_id', bulletId) : query.is('bullet_id', null);
+  query = primerId ? query.eq('primer_id', primerId) : query.is('primer_id', null);
+  query = brassId ? query.eq('brass_id', brassId) : query.is('brass_id', null);
+
+  const { data, error } = await query.limit(1).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 /** Link a rung to a real saved recipe once it's graduated into "the
  * load" — e.g. after using the rung's charge weight (and the Workup's
  * fixed components) to create one via RecipeForm. Purely a convenience

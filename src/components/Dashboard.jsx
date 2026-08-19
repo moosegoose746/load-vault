@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Boxes, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Beaker, Boxes, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
@@ -15,6 +15,7 @@ import { createLoadBatch, createRangeSession, fetchVelocityTrend, fetchTargetHis
 import { computeVelocityStats } from '../lib/stats.js';
 import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
 import { fetchUserFirearms, fetchRoundsFiredByFirearm } from '../lib/firearms.js';
+import { fetchMatchingWorkup } from '../lib/workups.js';
 
 // Section 3: "Main Dashboard Panel — Recipe Detail header, HUD metric
 // cards, metadata checklist, velocity log, action bar."
@@ -51,7 +52,7 @@ const TABS = [
   },
 ];
 
-export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange }) {
+export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange, onOpenWorkup }) {
   const [dashboardTab, setDashboardTab] = useState('overview');
   const [target, setTarget] = useState({ imageEl: null, imageBlob: null, shots: [], moa: null, groupInches: null });
   const [chronoShots, setChronoShots] = useState(null);
@@ -180,6 +181,30 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       .then(setInventoryMap)
       .catch((err) => console.error('Failed to load inventory for deduction preview', err));
   }, [isRealRecipe, authUser, activeRecipeId]);
+
+  // Does this recipe's exact component set (caliber/powder/bullet/primer/
+  // brass, all five) match an existing Load Workup? If so, surface it on
+  // Overview — see fetchMatchingWorkup in lib/workups.js for the strict
+  // matching rule (the user's own choice: every component must match,
+  // not just some of them). Purely a lookup, not a fetch of the Workup's
+  // full rung/chart data — the Overview card only needs the title + id
+  // to link out to the Workups page.
+  const [matchingWorkup, setMatchingWorkup] = useState(null);
+  useEffect(() => {
+    if (!isRealRecipe || !authUser) {
+      setMatchingWorkup(null);
+      return;
+    }
+    fetchMatchingWorkup(authUser.id, {
+      caliberId: recipe.caliberId,
+      powderId: recipe.powderId,
+      bulletId: recipe.bulletId,
+      primerId: recipe.primerId,
+      brassId: recipe.brassId,
+    })
+      .then(setMatchingWorkup)
+      .catch((err) => console.error('Failed to check for a matching Workup', err));
+  }, [isRealRecipe, authUser, activeRecipeId, recipe.caliberId, recipe.powderId, recipe.bulletId, recipe.primerId, recipe.brassId]);
 
   // Fetch this user's firearm profiles for the picker below — not scoped
   // to the recipe's caliber via a query (firearms.js has no such filter),
@@ -434,6 +459,21 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
           {isRealRecipe ? (
             <>
+              {matchingWorkup && (
+                <button
+                  type="button"
+                  onClick={() => onOpenWorkup?.(matchingWorkup.id)}
+                  className="flex items-center justify-between gap-3 rounded border border-amber-600 bg-amber-500/10 px-4 py-2.5 text-left transition-colors hover:border-amber-500"
+                >
+                  <span className="flex items-center gap-2 text-xs text-amber-200">
+                    <Beaker size={14} className="shrink-0 text-amber-400" />
+                    Part of a Load Workup —{' '}
+                    <span className="font-mono font-semibold text-amber-300">{matchingWorkup.title}</span>
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] text-amber-400">View Ladder →</span>
+                </button>
+              )}
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <FirearmSummaryCard firearm={linkedFirearm} roundsFiredByFirearm={roundsFiredByFirearm} />
 
