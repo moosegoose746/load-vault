@@ -330,6 +330,38 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
         setSaveState('saved');
         onSessionSaved?.(); // refetches the recipe, updating Rounds On Hand
+
+        // Invalidate the lazily-fetched Velocity Trend / Target History
+        // caches — a new session just landed for THIS recipe, so the old
+        // cached fetch (keyed only on activeRecipeId, not on session
+        // count) is now stale. Re-fetch trend data immediately if that
+        // card is currently showing "History" mode; target history just
+        // gets cleared and re-fetched next time the popup is opened.
+        if (targetHistoryOpen) {
+          setTargetHistoryLoading(true);
+          fetchTargetHistory(activeRecipeId)
+            .then(setTargetHistory)
+            .catch((err) => {
+              console.error('Failed to refresh target history', err);
+              setTargetHistory([]);
+            })
+            .finally(() => setTargetHistoryLoading(false));
+        } else {
+          setTargetHistory(null);
+        }
+        if (velocityMode === 'trend') {
+          setVelocityTrendLoading(true);
+          fetchVelocityTrend(activeRecipeId)
+            .then(setVelocityTrend)
+            .catch((err) => {
+              console.error('Failed to refresh velocity trend', err);
+              setVelocityTrend([]);
+            })
+            .finally(() => setVelocityTrendLoading(false));
+        } else {
+          setVelocityTrend(null);
+        }
+
         setTimeout(() => setSaveState('idle'), 2000);
       } catch (err) {
         console.error('Failed to save range session', err);
