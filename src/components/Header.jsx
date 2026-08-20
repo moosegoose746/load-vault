@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Scale, Sun, X } from 'lucide-react';
-import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
-import { useSync } from '../context/SyncContext.jsx';
 
 // Section 3: "Hero Header / Navigation Bar — Amber/gold logo, Sync Status
 // Badge, Range Mode Toggle, and Mobile Navigation." Also carries the
@@ -11,6 +9,19 @@ import { useSync } from '../context/SyncContext.jsx';
 // navigation. Renders one button per view OTHER than the current one
 // (so it scales past two views without becoming a single confusing
 // toggle button).
+//
+// NOTE: the Sync Status badge that used to sit here has been removed on
+// purpose (see the five-persona project review — Full-Stack Developer
+// finding) — it displayed "Synced"/"Queued"/"Syncing" for real saved
+// recipes even though `SyncContext.sync()` never actually wrote anything
+// to Supabase for them (only the no-longer-relevant demo-recipe path
+// exercised it, via a hardcoded `setTimeout`). A status indicator that
+// lies is worse than no indicator. `SyncContext`/`SyncProvider` and the
+// underlying Dexie/IndexedDB queue (`src/lib/db.js`) are untouched and
+// still wrapped around `AppShell` in App.jsx — that plumbing is legitimate
+// groundwork for a real offline-sync feature, just not surfaced in the UI
+// until a real recipe's Range Session save actually goes through it. See
+// the progress log's "Known gaps" for that as a future Tier 2/3 item.
 const VIEWS = [
   { key: 'vault', label: 'VAULT', icon: Crosshair },
   { key: 'inventory', label: 'INVENTORY', icon: Boxes },
@@ -42,7 +53,6 @@ function LifetimeSavedBadge({ amount }) {
 
 export default function Header({ user, onSignOut, view = 'vault', onChangeView, lifetimeSaved }) {
   const { rangeMode, toggleRangeMode } = useRangeMode();
-  const { status: syncStatus } = useSync();
   const [mobileOpen, setMobileOpen] = useState(false);
   const otherViews = VIEWS.filter((v) => v.key !== view);
 
@@ -58,7 +68,6 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView, 
 
         {/* Desktop controls */}
         <div className="hidden items-center gap-3 sm:flex">
-          <SyncStatusBadge status={syncStatus} />
           <LifetimeSavedBadge amount={lifetimeSaved} />
           {onChangeView &&
             otherViews.map(({ key, label, icon: Icon }) => (
@@ -106,7 +115,6 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView, 
 
       {mobileOpen && (
         <div className="flex flex-col gap-3 border-t border-slate-800 px-4 py-3 sm:hidden">
-          <SyncStatusBadge status={syncStatus} />
           <LifetimeSavedBadge amount={lifetimeSaved} />
           {onChangeView &&
             otherViews.map(({ key, label, icon: Icon }) => (
