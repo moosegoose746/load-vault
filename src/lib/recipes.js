@@ -323,11 +323,11 @@ export async function fetchTargetHistory(recipeId) {
 /** Every Loading Session (load_batches row) ever logged for this recipe,
  * newest first — the full bench history, as opposed to
  * fetchLastLoadingBatch above which only grabs the single most recent
- * one for the Overview tab's Recent Activity summary. Powers the
- * Loading History popup (see LoadingHistoryModal.jsx). Fetched lazily on
- * open, same reasoning as fetchTargetHistory/fetchVelocityTrend: most
- * Overview visits never need the full list, just the latest entry
- * fetchRecipeDetail already pulls in. */
+ * one for the Overview tab's Recent Activity summary. Powers the inline
+ * Loading History list on the Loading Session tab (see
+ * LoadingHistoryList.jsx), fetched lazily the first time that tab is
+ * viewed rather than on every recipe load, since most Overview/Range
+ * visits never need it. */
 export async function fetchLoadingHistory(recipeId) {
   const { data, error } = await supabase
     .from('load_batches')
