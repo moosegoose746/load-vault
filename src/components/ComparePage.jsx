@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Scale, Trophy, X } from 'lucide-react';
+import { AlertTriangle, Lightbulb, Scale, Trophy, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
 import { fetchUserRecipes, fetchRecipeDetail } from '../lib/recipes.js';
 
@@ -101,6 +101,97 @@ const ROWS = [
     better: 'higher',
   },
 ];
+
+// Drives the auto-generated takeaway line above the table (see
+// buildTakeaway below) — a deliberately SHORT, prioritized subset of ROWS,
+// not all of them. Order is the priority a reloader would actually weigh
+// a decision by: cost first (the most universally actionable number),
+// then accuracy/consistency (what the load actually does), then physical
+// stock (practical, but secondary to whether the load is good). ES is
+// deliberately left out here — it's highly correlated with SD and would
+// mostly just repeat the same story in different words, which is exactly
+// the kind of redundant clause a SHORT summary line can't afford. Money
+// Saved is last since it's a slower-moving, less decision-relevant
+// restatement of Cost/Round (it factors in how much you've loaded, not
+// just the per-round economics). `clause` takes the formatted value and
+// an optional context object (currently just `{ smallSample }` for SD)
+// and returns the fragment of sentence naming what this recipe does well.
+const TAKEAWAY_METRICS = [
+  { label: 'Cost / Round', clause: (v) => `is cheaper at ${v}/rd` },
+  { label: 'Group Size', clause: (v) => `groups tighter (${v})` },
+  {
+    label: 'SD',
+    clause: (v, ctx) => `has more consistent velocity (SD ${v}${ctx?.smallSample ? ', small sample' : ''})`,
+  },
+  { label: 'Loaded & Ready', clause: (v) => `has more loaded and ready (${v})` },
+  { label: 'Loadable From Stock', clause: (v) => `could load more from current stock (${v})` },
+  { label: 'Money Saved', clause: (v) => `has saved more money overall (${v})` },
+];
+
+const TAKEAWAY_MAX_CLAUSES_PER_RECIPE = 2;
+const TAKEAWAY_MAX_TOTAL_CLAUSES = 6;
+
+/** Builds the plain-English takeaway line — the "which one should I
+ * actually pick" summary that sits above the raw table. Deliberately
+ * reuses `rowStates` (the same diff/winner computation that drives the
+ * table's dimming and trophy badges) as its ONLY source of truth for
+ * "who wins what," rather than re-deriving winners with separate logic —
+ * that guarantees the takeaway line can never disagree with what the
+ * table itself shows (e.g. never crowning a winner on a caliber-mismatched
+ * row that the table correctly refuses to badge). Only considers recipes
+ * whose detail has actually loaded — a recipe still fetching just doesn't
+ * contribute a clause yet, rather than blocking or misrepresenting the
+ * summary for the ones that HAVE loaded.
+ *
+ * Caps at TAKEAWAY_MAX_CLAUSES_PER_RECIPE per recipe (a recipe that wins
+ * on cost, groups, AND stock still only gets its top 2 mentioned — the
+ * full picture is one scroll away in the table) and
+ * TAKEAWAY_MAX_TOTAL_CLAUSES overall (keeps a 5+ recipe comparison from
+ * turning into an unreadable run-on sentence). Returns `null` if fewer
+ * than two recipes have loaded yet, and a specific "no clear standout"
+ * message (rather than nothing) if every metric came back tied or
+ * unavailable — the absence of a difference is itself useful information
+ * for a reloader deciding between two loads. */
+function buildTakeaway(recipes, details, rowStates) {
+  const loaded = recipes.filter((r) => details[r.id]);
+  if (loaded.length < 2) return null;
+
+  const clausesByRecipeId = {};
+  let totalClauses = 0;
+
+  for (const metric of TAKEAWAY_METRICS) {
+    if (totalClauses >= TAKEAWAY_MAX_TOTAL_CLAUSES) break;
+    const row = ROWS.find((r) => r.label === metric.label);
+    const state = rowStates[metric.label];
+    // A winner set covering EVERY loaded recipe is just a tie dressed up
+    // as a win (computeRowState already excludes true ties via allSame,
+    // but guard here too in case only a subset of `loaded` has a numeric
+    // value for this row) — uninformative either way, skip it.
+    if (!row || !state || state.winnerIds.size === 0 || state.winnerIds.size >= loaded.length) continue;
+
+    for (const id of state.winnerIds) {
+      if (totalClauses >= TAKEAWAY_MAX_TOTAL_CLAUSES) break;
+      const existing = clausesByRecipeId[id] || [];
+      if (existing.length >= TAKEAWAY_MAX_CLAUSES_PER_RECIPE) continue;
+      const detail = details[id];
+      const value = row.format(row.get(detail));
+      const ctx = row.sampleSize
+        ? { smallSample: (detail.shots?.length ?? 0) > 0 && (detail.shots?.length ?? 0) < SMALL_SAMPLE_THRESHOLD }
+        : undefined;
+      clausesByRecipeId[id] = [...existing, metric.clause(value, ctx)];
+      totalClauses += 1;
+    }
+  }
+
+  const sentenceParts = loaded
+    .filter((r) => clausesByRecipeId[r.id]?.length)
+    .map((r) => `${r.title} ${clausesByRecipeId[r.id].join(' and ')}`);
+
+  if (!sentenceParts.length) {
+    return 'No clear standout on cost, accuracy, or stock — these recipes are close to identical on the numbers below.';
+  }
+  return `${sentenceParts.join('; ')}.`;
+}
 
 /** For one row, across every recipe whose detail has actually loaded:
  * (1) whether every displayed value is identical — used to dim the row,
@@ -233,6 +324,14 @@ export default function ComparePage({ authUser }) {
 
   const anyWinnerBadges = Object.values(rowStates).some((s) => s.winnerIds.size > 0);
 
+  // The auto-generated takeaway line — see buildTakeaway above. Recomputes
+  // whenever the row states do, since it's built entirely from them.
+  const takeaway = useMemo(
+    () => buildTakeaway(selectedRecipes, details, rowStates),
+    [selectedRecipes, details, rowStates]
+  );
+  const stillLoading = selectedIds.some((id) => loadingIds.includes(id));
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-4">
       <div className="flex items-center gap-2">
@@ -241,11 +340,12 @@ export default function ComparePage({ authUser }) {
         <InfoTooltip>
           Pick two or more of your recipes to see their specs and stats side by side — cost per
           round, velocity stats, group size, and how much of each is currently loaded or loadable
-          from stock. Rows where every recipe matches are dimmed; rows that differ are highlighted,
-          with the best value (cheapest, tightest, most stock) marked with a trophy. Avg
-          Velocity/SD/ES show how many shots they're based on — a small sample can look better or
-          worse than the load actually is. No chart here; for a charge-weight-vs-velocity ladder
-          chart, use a Load Workup instead.
+          from stock. A plain-English takeaway line summarizes the biggest differences, built from
+          the same numbers as the table below it. Rows where every recipe matches are dimmed; rows
+          that differ are highlighted, with the best value (cheapest, tightest, most stock) marked
+          with a trophy. Avg Velocity/SD/ES show how many shots they're based on — a small sample
+          can look better or worse than the load actually is. No chart here; for a
+          charge-weight-vs-velocity ladder chart, use a Load Workup instead.
         </InfoTooltip>
       </div>
 
@@ -293,6 +393,17 @@ export default function ComparePage({ authUser }) {
         <p className="font-mono text-xs text-slate-500">Pick at least one more recipe to compare.</p>
       ) : (
         <div className="flex flex-col gap-2">
+          {takeaway && (
+            <div className="flex items-start gap-2 rounded border border-sky-700/60 bg-sky-500/10 p-3 font-mono text-xs leading-relaxed text-sky-200">
+              <Lightbulb size={14} className="mt-0.5 shrink-0 text-sky-400" />
+              <span>
+                {takeaway}
+                {stillLoading && (
+                  <span className="ml-1 text-sky-400/70">(still loading the rest — may update)</span>
+                )}
+              </span>
+            </div>
+          )}
           {mismatchInfo.caliberMismatch && (
             <div className="flex items-start gap-2 rounded border border-amber-600 bg-amber-500/10 p-3 font-mono text-xs leading-relaxed text-amber-200">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
