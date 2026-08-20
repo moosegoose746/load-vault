@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
+import MoaBadge from './MoaBadge.jsx';
 import RecipeSpecsCard from './RecipeSpecsCard.jsx';
 import MoneySavedCard from './MoneySavedCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
@@ -85,7 +86,6 @@ export default function Dashboard({
   activeRecipeId,
   authUser,
   onSessionSaved,
-  onTargetChange,
   onOpenWorkup,
   onEditRecipe,
   onDeleteRecipe,
@@ -251,14 +251,18 @@ export default function Dashboard({
 
   const isRealRecipe = Boolean(activeRecipeId);
 
-  // Report the live MOA reading (and the distance it was measured at — a
-  // bare MOA number means nothing without knowing that, same reasoning as
-  // MoaBadge.jsx) up to App.jsx as shots are plotted, so the Sidebar's MOA
-  // badge updates in real time instead of only reflecting whatever was
-  // saved on the recipe's last range session.
-  useEffect(() => {
-    onTargetChange?.(target.moa, sessionDistanceYards);
-  }, [target.moa, sessionDistanceYards, onTargetChange]);
+  // Prefer the live reading from shots currently being plotted on the
+  // target; fall back to whatever MOA was saved on the recipe's last range
+  // session once nothing is actively being measured. Distance follows the
+  // same live-or-saved pairing — a bare MOA number is meaningless without
+  // knowing what distance it was measured at (see MoaBadge.jsx). Used to
+  // be lifted up to App.jsx and back down into the Sidebar's badge; now
+  // that the badge itself lives here on Overview, it can just read
+  // `target`/`sessionDistanceYards` directly — same tab-content-stays-
+  // mounted trick (see the comment on the tabs above) is what lets this
+  // still update live even while Range Day isn't the active tab.
+  const displayMoa = target.moa ?? recipe.groupSizeMoa;
+  const displayDistanceYards = target.moa != null ? sessionDistanceYards : recipe.distanceYards;
 
   // Same idea for velocity: while a chrono file is imported or shots are
   // typed in manually this session, the HUD cards and Velocity Log should
@@ -627,30 +631,31 @@ export default function Dashboard({
           shots, calibration) that would otherwise be lost every time you
           switched away from Range Day and back. */}
       <div className={dashboardTab === 'overview' ? 'flex flex-col gap-4' : 'hidden'}>
+          {/* Moved here from the Sidebar (see the sidebar redesign
+              discussion in the progress log) — it's the headline number
+              for whichever recipe is open, same as everything else on this
+              tab, so it belongs at the top of that recipe's own content
+              rather than pinned in a persistent side panel. Still updates
+              live off shots being plotted on Range Day even while sitting
+              on this Overview tab, same as before (see displayMoa above). */}
+          <MoaBadge moa={displayMoa} distanceYards={displayDistanceYards} />
+
           <div className="grid grid-cols-3 gap-3">
             <MetricCard value={displayAvgVelocity} unit="FPS" label="Avg FPS" />
             <MetricCard value={displayStdDevFps} unit="FPS" label="FPS SD" />
             <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
           </div>
 
-          {/* Cost/Round, Loaded & Ready, Loadable From Stock, and Money
-              Saved — moved here from the Sidebar (see the sidebar redesign
-              discussion in the progress log), which was too cramped at
-              288px wide for four highlighted stats plus the full spec
-              sheet below. Same MetricCard shape as the FPS row above so
-              they read as one continuous HUD rather than two different
-              card styles stacked on top of each other. Money Saved keeps
-              its own card component since it has an inline editable price
-              field the other three don't need. All four render for the
-              demo recipe too (mockRecipe.js has a sample costPerRound;
-              MoneySavedCard self-hides when there's no real recipeId to
-              persist a price against). */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <MetricCard
-              value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : null}
-              label="Cost / Round"
-              info={`What one round of this recipe costs in components, from your own saved Inventory pricing. Shows "—" if any component doesn't have a saved price yet.`}
-            />
+          {/* Split into two rows by kind, rather than one crowded row of
+              five: Loaded & Ready and Loadable From Stock are both raw
+              round-count estimates (how much ammo exists, one way or
+              another), while Cost/Round, Total Money Spent, and Money
+              Saved are all dollar figures. Grouping like with like reads
+              faster than five different units side by side. All render
+              for the demo recipe too (mockRecipe.js has a sample
+              costPerRound; MoneySavedCard self-hides when there's no real
+              recipeId to persist a price against). */}
+          <div className="grid grid-cols-2 gap-3">
             <MetricCard
               value={recipe.roundsOnHand != null ? recipe.roundsOnHand : null}
               unit="rds"
@@ -666,6 +671,14 @@ export default function Dashboard({
               unit={recipe.loadableFromStock != null ? `(${recipe.loadableBottleneck})` : null}
               label="Loadable From Stock"
               info="How many MORE rounds you could load from raw components you have on hand — a raw-materials estimate, not rounds already assembled (that's Loaded & Ready above). Limited by whichever tracked component would run out first."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <MetricCard
+              value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : null}
+              label="Cost / Round"
+              info={`What one round of this recipe costs in components, from your own saved Inventory pricing. Shows "—" if any component doesn't have a saved price yet.`}
             />
             <MetricCard
               value={recipe.totalMoneySpent != null ? `$${recipe.totalMoneySpent.toFixed(2)}` : null}

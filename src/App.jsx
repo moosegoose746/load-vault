@@ -129,13 +129,6 @@ function AppShell() {
   // the "no settings page exists" gap from the five-persona review; opened
   // from the new gear icon in Header.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Live MOA reading (+ the distance it was measured at — MoaBadge shows
-  // "MOA @ 100YD", so both need to move together) from the Target Analysis
-  // section (Dashboard), lifted up here so the Sidebar's MOA badge can
-  // reflect shots being plotted right now, not just whatever was saved on
-  // the recipe's last range session.
-  const [liveMoa, setLiveMoa] = useState(null);
-  const [liveDistanceYards, setLiveDistanceYards] = useState(null);
   // Account-wide "Lifetime Money Saved" — see fetchLifetimeMoneySaved in
   // lib/recipes.js and the LifetimeSavedBadge in Header.jsx. Deliberately
   // separate from activeRecipe/loadActiveRecipe below: this sums across
@@ -240,14 +233,6 @@ function AppShell() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingProgress, userRecipes.length, auth.profile]);
-
-  // Reset the live MOA reading (and its paired distance) whenever the
-  // active recipe changes, so switching recipes doesn't leave a stale
-  // reading from the previous one showing in the badge.
-  useEffect(() => {
-    setLiveMoa(null);
-    setLiveDistanceYards(null);
-  }, [activeRecipeId]);
 
   const handleDeleteRecipe = useCallback(
     async (recipeId) => {
@@ -371,8 +356,6 @@ function AppShell() {
                 setRecipeFormOpen(true);
               }}
               onViewArchived={() => setArchivedModalOpen(true)}
-              liveMoa={liveMoa}
-              liveDistanceYards={liveDistanceYards}
             />
             <Dashboard
               key={activeRecipeId ?? 'demo'}
@@ -380,10 +363,6 @@ function AppShell() {
               activeRecipeId={activeRecipeId}
               authUser={auth.user}
               onSessionSaved={handleRecipeDataChanged}
-              onTargetChange={(moa, distanceYards) => {
-                setLiveMoa(moa);
-                setLiveDistanceYards(distanceYards);
-              }}
               onOpenWorkup={(workupId) => {
                 setPendingWorkupId(workupId);
                 setView('workups');

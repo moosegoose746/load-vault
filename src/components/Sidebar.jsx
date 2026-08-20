@@ -1,20 +1,20 @@
 import { useMemo, useState } from 'react';
 import { ArrowDownNarrowWide, Plus } from 'lucide-react';
-import MoaBadge from './MoaBadge.jsx';
 
-// Section 3: "Left Sidebar (Specs & Filter Panel) — Prominent MOA Badge,
-// Dropdown Selectors (Caliber/Powder/Bullet), Quick Spec List."
+// Section 3: originally "Left Sidebar (Specs & Filter Panel) — Prominent
+// MOA Badge, Dropdown Selectors (Caliber/Powder/Bullet), Quick Spec List."
 //
 // The original Phase 2 version had hardcoded, non-functional
 // caliber/powder/bullet "filter" dropdowns as placeholders. Now that real
 // recipes exist, this is a real recipe switcher instead: pick a saved
 // recipe to view, or create a new one, and filter/sort down to a specific
-// one once there's enough to make that worthwhile. The full spec sheet
-// (Component Specs, Cost/Round, Loaded & Ready, Money Saved, Loadable
-// From Stock) used to live here too, but moved to Dashboard.jsx's Overview
-// (and a compact reference on Loading Session) — it only ever describes
-// whichever recipe is open, so it belongs with that recipe's own content
-// rather than pinned in a 288px-wide side panel that was cramped for it.
+// one once there's enough to make that worthwhile. The MOA badge and the
+// full spec sheet (Component Specs, Cost/Round, Loaded & Ready, Money
+// Saved, Loadable From Stock) used to live here too, but moved to
+// Dashboard.jsx's Overview (and a compact spec reference on Loading
+// Session) — they only ever describe whichever recipe is open, so they
+// belong with that recipe's own content rather than pinned in a
+// 288px-wide side panel that was cramped for them.
 
 export default function Sidebar({
   recipe,
@@ -23,8 +23,6 @@ export default function Sidebar({
   onSelectRecipe,
   onNewRecipe,
   onViewArchived,
-  liveMoa,
-  liveDistanceYards,
 }) {
   const [caliberFilter, setCaliberFilter] = useState('');
   const [firearmFilter, setFirearmFilter] = useState('');
@@ -89,18 +87,8 @@ export default function Sidebar({
   const selectOptions =
     activeRecipeId && !activeRecipeStillListed ? [{ id: activeRecipeId, title: recipe.title }, ...filteredRecipes] : filteredRecipes;
 
-  // Prefer the live reading from shots currently being plotted on the
-  // target; fall back to whatever MOA was saved on the recipe's last range
-  // session once nothing is actively being measured. Distance follows the
-  // same live-or-saved pairing — a bare MOA number is meaningless without
-  // knowing what distance it was measured at (see MoaBadge.jsx).
-  const displayMoa = liveMoa ?? recipe.groupSizeMoa;
-  const displayDistanceYards = liveMoa != null ? liveDistanceYards : recipe.distanceYards;
-
   return (
     <aside className="flex w-full flex-col gap-6 border-slate-800 p-4 sm:w-72 sm:border-r">
-      <MoaBadge moa={displayMoa} distanceYards={displayDistanceYards} />
-
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>
 
