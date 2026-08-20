@@ -645,7 +645,7 @@ export default function Dashboard({
               demo recipe too (mockRecipe.js has a sample costPerRound;
               MoneySavedCard self-hides when there's no real recipeId to
               persist a price against). */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <MetricCard
               value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : null}
               label="Cost / Round"
@@ -666,6 +666,11 @@ export default function Dashboard({
               unit={recipe.loadableFromStock != null ? `(${recipe.loadableBottleneck})` : null}
               label="Loadable From Stock"
               info="How many MORE rounds you could load from raw components you have on hand — a raw-materials estimate, not rounds already assembled (that's Loaded & Ready above). Limited by whichever tracked component would run out first."
+            />
+            <MetricCard
+              value={recipe.totalMoneySpent != null ? `$${recipe.totalMoneySpent.toFixed(2)}` : null}
+              label="Total Money Spent"
+              info="Cost/Round × every round ever logged as loaded under this recipe (lifetime, not just what's currently on hand) — what you've actually put into this recipe, component-wise, since day one."
             />
             <MoneySavedCard
               recipe={recipe}

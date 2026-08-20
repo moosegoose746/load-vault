@@ -493,6 +493,16 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     extremeSpread: session?.extreme_spread_fps ?? null,
     targetImageUrl: session?.target_image_url ?? null,
     costPerRound,
+    // Total spent loading this recipe, lifetime — Cost/Round × every round
+    // EVER logged as loaded (fetchTotalRoundsLoaded), same rounds-loaded
+    // basis Money Saved uses just below and for the same reason: cost is
+    // locked in the moment components get consumed at the bench, not when
+    // the round eventually gets fired, so this shouldn't shrink or hide
+    // spend just because some of that ammo hasn't been shot yet. `null`
+    // (not "$0.00") when Cost/Round itself is unknown — some component
+    // still needs a saved Inventory price — vs. a legitimate $0.00 once
+    // pricing is known but nothing's been loaded yet.
+    totalMoneySpent: costPerRound != null ? costPerRound * (totalRoundsLoaded ?? 0) : null,
     // See schema_recipes_v3.sql. factoryPricePerRound is the raw
     // user-entered value (used to pre-fill the edit input in Sidebar);
     // moneySaved is the derived stat actually rendered — both null until

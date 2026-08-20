@@ -56,6 +56,12 @@ const ROWS = [
   { label: 'COAL', get: (r) => r.coalInches, format: (v) => (v != null ? `${v}"` : '—') },
   { label: 'Firearm', get: (r) => r.firearmLabel, format: (v) => v || '—' },
   { label: 'Cost / Round', get: (r) => r.costPerRound, format: moneyFmt, better: 'lower' },
+  // No `better` direction here, unlike Cost/Round — this scales with how
+  // much of each recipe you've actually loaded, not with how
+  // cost-efficient the recipe is, so a lower number doesn't mean a
+  // "better" recipe, just that less has been assembled under it. Crowning
+  // a winner on that would be misleading (see computeRowState below).
+  { label: 'Total Money Spent', get: (r) => r.totalMoneySpent, format: moneyFmt },
   { label: 'Money Saved', get: (r) => r.moneySaved, format: moneyFmt, better: 'higher' },
   {
     label: 'Avg Velocity',
