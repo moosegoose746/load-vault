@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Beaker, Boxes, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Beaker, Boxes, ChevronRight, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
@@ -559,25 +559,27 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
                   <button
                     type="button"
                     onClick={openLoadingHistory}
-                    className="mt-3 flex w-full items-center justify-between text-xs hover:text-amber-400"
+                    className="group mt-3 flex w-full items-center justify-between text-xs hover:text-amber-400"
                   >
-                    <span className="text-slate-500">Last loaded</span>
-                    <span className="font-mono text-slate-200">
+                    <span className="text-slate-500 group-hover:text-amber-400">Last loaded</span>
+                    <span className="flex items-center gap-1 font-mono text-slate-200">
                       {recipe.lastLoadedAt
                         ? `${recipe.lastLoadedRounds ?? '?'} rds — ${new Date(recipe.lastLoadedAt).toLocaleDateString()}`
                         : '—'}
+                      <ChevronRight size={13} className="shrink-0 text-amber-500" />
                     </span>
                   </button>
                   <button
                     type="button"
                     onClick={openFiringHistory}
-                    className="mt-2 flex w-full items-center justify-between border-t border-slate-800 pt-2 text-xs hover:text-amber-400"
+                    className="group mt-2 flex w-full items-center justify-between border-t border-slate-800 pt-2 text-xs hover:text-amber-400"
                   >
-                    <span className="text-slate-500">Last fired</span>
-                    <span className="font-mono text-slate-200">
+                    <span className="text-slate-500 group-hover:text-amber-400">Last fired</span>
+                    <span className="flex items-center gap-1 font-mono text-slate-200">
                       {recipe.lastFiredAt
                         ? `${recipe.lastFiredRounds ?? '?'} rds — ${new Date(recipe.lastFiredAt).toLocaleDateString()}`
                         : '—'}
+                      <ChevronRight size={13} className="shrink-0 text-amber-500" />
                     </span>
                   </button>
                 </div>
