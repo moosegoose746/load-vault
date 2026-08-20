@@ -346,7 +346,16 @@ export default function WorkupChart({ rungs }) {
           })()}
           {(active.groupSizeMoa != null || active.roundsFired != null) && (
             <div className="text-slate-400">
-              {active.groupSizeMoa != null && <span>{active.groupSizeMoa.toFixed(2)} MOA</span>}
+              {active.groupSizeMoa != null && (
+                <span>
+                  {active.groupSizeMoa.toFixed(2)} MOA
+                  {active.distanceYards != null ? (
+                    ` @ ${active.distanceYards}yd`
+                  ) : (
+                    <span className="text-amber-500"> (distance unknown)</span>
+                  )}
+                </span>
+              )}
               {active.groupSizeMoa != null && active.roundsFired != null && <span> · </span>}
               {active.roundsFired != null && <span>{active.roundsFired} rds</span>}
             </div>

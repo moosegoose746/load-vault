@@ -229,7 +229,17 @@ function WorkupFormModal({ open, onClose, onCreated, authUser }) {
 }
 
 function emptyRungForm() {
-  return { chargeGrains: '', shots: '', avgVelocity: '', stdDevFps: '', extremeSpread: '', groupSizeMoa: '', roundsFired: '', notes: '' };
+  return {
+    chargeGrains: '',
+    distanceYards: '',
+    shots: '',
+    avgVelocity: '',
+    stdDevFps: '',
+    extremeSpread: '',
+    groupSizeMoa: '',
+    roundsFired: '',
+    notes: '',
+  };
 }
 
 // Add-a-rung form, inline at the bottom of the Workup detail view rather
@@ -257,6 +267,7 @@ function AddRungForm({ workupId, onAdded }) {
     try {
       await addWorkupRung(workupId, {
         chargeGrains,
+        distanceYards: form.distanceYards ? Number.parseInt(form.distanceYards, 10) : null,
         shots: parsedShots.length ? parsedShots : null,
         avgVelocity: form.avgVelocity ? Number.parseFloat(form.avgVelocity) : null,
         stdDevFps: form.stdDevFps ? Number.parseFloat(form.stdDevFps) : null,
@@ -279,6 +290,9 @@ function AddRungForm({ workupId, onAdded }) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="Charge Weight (gr)">
           <input required type="number" step="0.1" min="0" value={form.chargeGrains} onChange={update('chargeGrains')} className={inputClass} />
+        </Field>
+        <Field label="Distance (yd)">
+          <input type="number" step="1" min="1" value={form.distanceYards} onChange={update('distanceYards')} className={inputClass} placeholder="e.g. 100" />
         </Field>
         <Field label="Group (MOA)">
           <input type="number" step="0.01" min="0" value={form.groupSizeMoa} onChange={update('groupSizeMoa')} className={inputClass} />
@@ -410,6 +424,7 @@ function ImportRungForm({ workup, userId, onAdded }) {
     setSelectedSessionId(session.id);
     setPreview({
       chargeGrains: String(recipe.chargeGrains),
+      distanceYards: session.distanceYards != null ? String(session.distanceYards) : '',
       shots: session.shots.length ? session.shots.join(', ') : '',
       avgVelocity: session.avgVelocity != null ? String(session.avgVelocity) : '',
       stdDevFps: session.stdDevFps != null ? String(session.stdDevFps) : '',
@@ -458,6 +473,7 @@ function ImportRungForm({ workup, userId, onAdded }) {
     try {
       const rung = await addWorkupRung(workup.id, {
         chargeGrains,
+        distanceYards: preview.distanceYards ? Number.parseInt(preview.distanceYards, 10) : null,
         shots: parsedShots.length ? parsedShots : null,
         avgVelocity: preview.avgVelocity ? Number.parseFloat(preview.avgVelocity) : null,
         stdDevFps: preview.stdDevFps ? Number.parseFloat(preview.stdDevFps) : null,
@@ -560,6 +576,7 @@ function ImportRungForm({ workup, userId, onAdded }) {
                 >
                   <span>{new Date(session.createdAt).toLocaleDateString()}</span>
                   <span className="text-slate-500">
+                    {session.distanceYards != null ? `${session.distanceYards}yd · ` : ''}
                     {session.avgVelocity != null ? `${session.avgVelocity} fps avg` : 'no chrono data'}
                     {session.roundsFired != null ? ` · ${session.roundsFired} rds` : ''}
                   </span>
@@ -598,6 +615,9 @@ function ImportRungForm({ workup, userId, onAdded }) {
             onChange={updatePreview('chargeGrains')}
             className={inputClass}
           />
+        </Field>
+        <Field label="Distance (yd)">
+          <input type="number" step="1" min="1" value={preview.distanceYards} onChange={updatePreview('distanceYards')} className={inputClass} placeholder="e.g. 100" />
         </Field>
         <Field label="Group (MOA)">
           <input type="number" step="0.01" min="0" value={preview.groupSizeMoa} onChange={updatePreview('groupSizeMoa')} className={inputClass} />
@@ -794,6 +814,7 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
                         <th className="px-2 py-1.5 text-right">SD</th>
                         <th className="px-2 py-1.5 text-right">ES</th>
                         <th className="px-2 py-1.5 text-right">Group</th>
+                        <th className="px-2 py-1.5 text-right">Dist</th>
                         <th className="px-2 py-1.5 text-right">Rounds</th>
                         <th className="px-2 py-1.5 text-left">Notes</th>
                         <th className="px-2 py-1.5" />
@@ -809,6 +830,17 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
                           <NumCell>{rung.stdDevFps ?? '—'}</NumCell>
                           <NumCell>{rung.extremeSpread ?? '—'}</NumCell>
                           <NumCell>{rung.groupSizeMoa != null ? rung.groupSizeMoa.toFixed(2) : '—'}</NumCell>
+                          <NumCell>
+                            {rung.distanceYards != null ? (
+                              `${rung.distanceYards}yd`
+                            ) : rung.groupSizeMoa != null ? (
+                              <span className="text-amber-500" title="Distance wasn't recorded for this rung">
+                                unknown
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </NumCell>
                           <NumCell>{rung.roundsFired ?? '—'}</NumCell>
                           <td className="max-w-[10rem] truncate px-2 py-1.5 font-mono text-xs text-slate-500" title={rung.notes}>
                             {rung.notes || '—'}

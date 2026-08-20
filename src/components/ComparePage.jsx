@@ -86,6 +86,15 @@ const ROWS = [
     format: (v) => (v != null ? `${numberFmt(v, 2)} MOA` : '—'),
     better: 'lower',
     caliberSensitive: true,
+    // MOA is already distance-normalized by definition, so a mismatch
+    // here doesn't disqualify the comparison the way caliberSensitive
+    // does — it's shown as context (see distanceContext below) rather
+    // than gating the winner trophy, since a 1 MOA group at 100yd and a
+    // 1 MOA group at 300yd genuinely are the same number. What differs
+    // is confidence in that number (fewer shots / farther distances
+    // amplify wind and measurement error), which is the user's call to
+    // weigh, not something the app should silently decide for them.
+    distanceContext: true,
   },
   { label: 'Distance', get: (r) => r.distanceYards, format: (v) => (v != null ? `${v} yd` : '—') },
   {
@@ -426,9 +435,10 @@ export default function ComparePage({ authUser }) {
             <div className="flex items-start gap-2 rounded border border-slate-700 bg-slate-900/60 p-3 font-mono text-xs leading-relaxed text-slate-400">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-slate-500" />
               <span>
-                These recipes were tested at different distances — Group Size is in MOA (already
-                angle-normalized, so it's still comparable), but keep in mind different range days
-                and distances can mean different conditions behind the numbers.
+                These recipes were tested at different distances (see the yardage under each Group
+                Size below) — MOA is already angle-normalized, so the numbers are still directly
+                comparable, but a farther distance and fewer shots both add more room for wind and
+                measurement error behind the same MOA value.
               </span>
             </div>
           )}
@@ -532,6 +542,15 @@ export default function ComparePage({ authUser }) {
                               >
                                 n={shotCount} shot{shotCount === 1 ? '' : 's'}
                                 {shotCount < SMALL_SAMPLE_THRESHOLD ? ' · small sample' : ''}
+                              </div>
+                            )}
+                            {row.distanceContext && value != null && (
+                              <div
+                                className={`mt-0.5 text-[10px] font-normal ${
+                                  detail.distanceYards != null ? 'text-slate-500' : 'text-amber-500'
+                                }`}
+                              >
+                                {detail.distanceYards != null ? `@ ${detail.distanceYards}yd` : 'distance unknown'}
                               </div>
                             )}
                           </td>

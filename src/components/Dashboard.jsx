@@ -88,6 +88,20 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const [firearmIdEdited, setFirearmIdEdited] = useState(false);
   const [roundsFiredByFirearm, setRoundsFiredByFirearm] = useState({});
 
+  // Distance THIS Range Session was actually shot at — the whole point
+  // being that distance is a fact about a specific range day, not a
+  // fixed property of the recipe (the same load can be tested at 50, 100,
+  // or 300 yards on different days). Defaults to whatever the recipe's
+  // most recent session had (recipe.distanceYards, itself already
+  // defaulted to 100 upstream if nothing real was ever set — see
+  // fetchRecipeDetail), but is fully editable, and — same pattern as
+  // Rounds Fired/Firearm above — never silently overwritten once the
+  // user's actually touched it, and reset whenever the active recipe
+  // changes. Feeds both TargetCalculator's MOA math and the value
+  // actually saved on the new range_sessions row.
+  const [sessionDistanceYards, setSessionDistanceYards] = useState(recipe.distanceYards);
+  const [distanceEdited, setDistanceEdited] = useState(false);
+
   // Local echo of the recipe's notes so RecipeNotesCard can reflect a save
   // immediately without waiting on a full recipe refetch — reset whenever
   // the active recipe (or its fetched notes) actually changes.
@@ -306,6 +320,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     setBatchNotes('');
     setBatchStatus('idle');
     setFirearmIdEdited(false);
+    setDistanceEdited(false);
   }, [activeRecipeId]);
 
   useEffect(() => {
@@ -319,6 +334,12 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       setFirearmId(recipe.defaultFirearmId || '');
     }
   }, [recipe.defaultFirearmId, firearmIdEdited]);
+
+  useEffect(() => {
+    if (!distanceEdited) {
+      setSessionDistanceYards(recipe.distanceYards);
+    }
+  }, [recipe.distanceYards, distanceEdited]);
 
   const recipeComponents = useMemo(
     () => ({
@@ -399,7 +420,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         await createRangeSession({
           recipeId: activeRecipeId,
           userId: authUser.id,
-          distanceYards: recipe.distanceYards,
+          distanceYards: sessionDistanceYards,
           groupSizeMoa: target.moa,
           groupInches: target.groupInches,
           avgVelocity: stats?.avg ?? null,
@@ -472,7 +493,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       // goes through the offline-queue simulation from Phase 4 instead.
       await saveSession({
         title: recipe.title,
-        distanceYards: recipe.distanceYards,
+        distanceYards: sessionDistanceYards,
         moa: target.moa,
         groupInches: target.groupInches,
         shotCount: target.shots.length,
@@ -798,11 +819,34 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
       <div className={dashboardTab === 'range' ? 'flex flex-col gap-4' : 'hidden'}>
           <div className="rounded border border-slate-800 bg-panel p-4">
-            <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
-              Target Analysis
-            </h2>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="flex items-center font-mono text-xs uppercase tracking-widest text-amber-400">
+                Target Analysis
+                <InfoTooltip>
+                  MOA is distance-dependent — 1 MOA is about 1.047" at 100 yards, but roughly double
+                  that in actual inches at 200 yards for the same MOA value. Set the real distance
+                  this target was shot at so the MOA figure below (and whatever gets saved to this
+                  session) is measuring against the right number.
+                </InfoTooltip>
+              </h2>
+              <label className="flex items-center gap-1.5">
+                <span className="font-mono text-[10px] uppercase text-slate-500">Distance (yd)</span>
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={sessionDistanceYards ?? ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSessionDistanceYards(val ? Number(val) : null);
+                    setDistanceEdited(true);
+                  }}
+                  className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </label>
+            </div>
             <TargetCalculator
-              distanceYards={recipe.distanceYards}
+              distanceYards={sessionDistanceYards}
               onStateChange={setTarget}
               initialImageUrl={recipe.targetImageUrl}
             />
@@ -899,6 +943,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         imageEl={target.imageEl}
         shots={target.shots}
         moa={target.moa}
+        distanceYards={sessionDistanceYards}
         recipe={recipe}
         avgVelocity={displayAvgVelocity}
         stdDevFps={displayStdDevFps}

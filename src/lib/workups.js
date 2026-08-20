@@ -40,6 +40,11 @@ function mapRungRow(row) {
     stdDevFps: row.std_dev_fps,
     extremeSpread: row.extreme_spread_fps,
     groupSizeMoa: row.group_size_moa,
+    // Distance this rung's group/velocity data was actually measured at
+    // — nullable, since older rungs (and any added without one) predate
+    // this column and genuinely have no known distance. Null is treated
+    // as "unknown" throughout the UI, never silently assumed to be 100.
+    distanceYards: row.distance_yards ?? null,
     roundsFired: row.rounds_fired,
     notes: row.notes || '',
     recipeId: row.recipe_id,
@@ -153,6 +158,7 @@ export async function addWorkupRung(workupId, fields) {
       std_dev_fps: computed ? Number(computed.sd.toFixed(1)) : fields.stdDevFps ?? null,
       extreme_spread_fps: computed ? computed.es : fields.extremeSpread ?? null,
       group_size_moa: fields.groupSizeMoa ?? null,
+      distance_yards: fields.distanceYards ?? null,
       rounds_fired: fields.roundsFired ?? null,
       notes: fields.notes || null,
     })
@@ -252,7 +258,7 @@ export async function fetchRecipeRangeSessionsForImport(recipeId) {
   const { data, error } = await supabase
     .from('range_sessions')
     .select(
-      'id, created_at, avg_velocity_fps, std_dev_fps, extreme_spread_fps, group_size_moa, rounds_fired, shot_logs ( shot_number, velocity_fps )'
+      'id, created_at, distance_yards, avg_velocity_fps, std_dev_fps, extreme_spread_fps, group_size_moa, rounds_fired, shot_logs ( shot_number, velocity_fps )'
     )
     .eq('recipe_id', recipeId)
     .order('created_at', { ascending: false });
@@ -260,6 +266,7 @@ export async function fetchRecipeRangeSessionsForImport(recipeId) {
   return (data || []).map((s) => ({
     id: s.id,
     createdAt: s.created_at,
+    distanceYards: s.distance_yards ?? null,
     avgVelocity: s.avg_velocity_fps,
     stdDevFps: s.std_dev_fps,
     extremeSpread: s.extreme_spread_fps,

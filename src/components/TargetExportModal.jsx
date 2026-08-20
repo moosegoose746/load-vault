@@ -53,6 +53,7 @@ export default function TargetExportModal({
   imageEl,
   shots,
   moa,
+  distanceYards,
   recipe,
   avgVelocity,
   stdDevFps,
@@ -123,7 +124,10 @@ export default function TargetExportModal({
     ctx.fillText(moa != null ? moa.toFixed(2) : '—', 44, 132);
     ctx.font = '24px monospace';
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('MOA', 44, 174);
+    // MOA is distance-dependent, so the badge is meaningless as a
+    // stand-alone number without saying what distance it was measured
+    // at — "MOA @ 100YD" rather than just "MOA".
+    ctx.fillText(distanceYards != null ? `MOA @ ${distanceYards}YD` : 'MOA', 44, 174);
 
     const statsX = 24 + moaBoxWidth + 24;
     const statsWidth = EXPORT_SIZE - statsX - 24;
@@ -246,7 +250,7 @@ export default function TargetExportModal({
         return URL.createObjectURL(blob);
       });
     }, 'image/png');
-  }, [open, imageEl, shots, moa, recipe, avgVelocity, stdDevFps, extremeSpread, qrReady]);
+  }, [open, imageEl, shots, moa, distanceYards, recipe, avgVelocity, stdDevFps, extremeSpread, qrReady]);
 
   if (!open) return null;
 
