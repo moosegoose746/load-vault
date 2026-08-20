@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Sun, X } from 'lucide-react';
+import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Scale, Sun, X } from 'lucide-react';
 import SyncStatusBadge from './SyncStatusBadge.jsx';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
 import { useSync } from '../context/SyncContext.jsx';
@@ -16,6 +16,7 @@ const VIEWS = [
   { key: 'inventory', label: 'INVENTORY', icon: Boxes },
   { key: 'firearms', label: 'FIREARMS', icon: Layers },
   { key: 'workups', label: 'WORKUPS', icon: Beaker },
+  { key: 'compare', label: 'COMPARE', icon: Scale },
 ];
 
 // Lifetime Money Saved — see fetchLifetimeMoneySaved in lib/recipes.js.

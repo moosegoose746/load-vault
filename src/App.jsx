@@ -9,6 +9,7 @@ import RecipeForm from './components/RecipeForm.jsx';
 import InventoryPage from './components/InventoryPage.jsx';
 import FirearmsPage from './components/FirearmsPage.jsx';
 import WorkupsPage from './components/WorkupsPage.jsx';
+import ComparePage from './components/ComparePage.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import {
   archiveRecipe,
@@ -94,7 +95,7 @@ function AppShell() {
   const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
   const loading = DEV_SKIP_AUTH ? false : auth.loading;
 
-  const [view, setView] = useState('vault'); // 'vault' | 'inventory' | 'firearms' | 'workups'
+  const [view, setView] = useState('vault'); // 'vault' | 'inventory' | 'firearms' | 'workups' | 'compare'
   // Deep-link target for the Workups page — set when a recipe's Overview
   // tab's "Part of a Load Workup" card is clicked (see Dashboard.jsx),
   // consumed once by WorkupsPage then cleared.
@@ -247,6 +248,8 @@ function AppShell() {
             initialOpenWorkupId={pendingWorkupId}
             onInitialWorkupOpened={() => setPendingWorkupId(null)}
           />
+        ) : view === 'compare' ? (
+          <ComparePage authUser={auth.user} />
         ) : (
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar
