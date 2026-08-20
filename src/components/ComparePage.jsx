@@ -23,6 +23,14 @@ import { fetchUserRecipes, fetchRecipeDetail } from '../lib/recipes.js';
 const numberFmt = (value, digits = 0) => (value == null ? '—' : Number(value).toFixed(digits));
 const moneyFmt = (value) => (value == null ? '—' : `$${Number(value).toFixed(2)}`);
 
+// Below this many recorded shots, SD/ES (and the average they're built
+// from) can look meaningfully better or worse than the load actually is —
+// same threshold and reasoning as the Workup chart's small-sample caveat
+// (see WorkupChart.jsx's Observations panel). Used below to color the
+// shot-count subtext amber as a quiet caution, not to hide or gate the
+// stat itself — a 3-shot group is still real data, just lower-confidence.
+const SMALL_SAMPLE_THRESHOLD = 5;
+
 // One row per spec/stat, in display order. `get` pulls the value off a
 // mapRecipeRow-shaped detail object; `format` turns it into display text.
 // `better` — 'lower' | 'higher' | null — is what powers the winner badge
@@ -32,7 +40,12 @@ const moneyFmt = (value) => (value == null ? '—' : `$${Number(value).toFixed(2
 // pure specs (caliber, powder, etc. — there's no "better" caliber) and on
 // numbers that don't have one universally correct direction (Avg
 // Velocity, Charge Weight, Distance — a higher or lower value isn't
-// inherently better, it's just different).
+// inherently better, it's just different). `sampleSize` marks the three
+// rows derived from the latest range session's shot-by-shot log (Avg
+// Velocity, SD, ES) — their cells get a small "n=X shots" subtext (see
+// SMALL_SAMPLE_THRESHOLD above) so a 3-shot SD and a 20-shot SD aren't
+// presented with equal confidence just because they're both numbers in
+// the same row.
 const ROWS = [
   { label: 'Caliber', get: (r) => r.caliber, format: (v) => v || '—' },
   { label: 'Powder', get: (r) => r.powder, format: (v) => v || '—' },
@@ -49,6 +62,7 @@ const ROWS = [
     get: (r) => r.avgVelocity,
     format: (v) => (v != null ? `${numberFmt(v)} fps` : '—'),
     caliberSensitive: true,
+    sampleSize: true,
   },
   {
     label: 'SD',
@@ -56,6 +70,7 @@ const ROWS = [
     format: (v) => (v != null ? numberFmt(v, 1) : '—'),
     better: 'lower',
     caliberSensitive: true,
+    sampleSize: true,
   },
   {
     label: 'ES',
@@ -63,6 +78,7 @@ const ROWS = [
     format: (v) => (v != null ? numberFmt(v, 1) : '—'),
     better: 'lower',
     caliberSensitive: true,
+    sampleSize: true,
   },
   {
     label: 'Group Size',
@@ -226,8 +242,10 @@ export default function ComparePage({ authUser }) {
           Pick two or more of your recipes to see their specs and stats side by side — cost per
           round, velocity stats, group size, and how much of each is currently loaded or loadable
           from stock. Rows where every recipe matches are dimmed; rows that differ are highlighted,
-          with the best value (cheapest, tightest, most stock) marked with a trophy. No chart here;
-          for a charge-weight-vs-velocity ladder chart, use a Load Workup instead.
+          with the best value (cheapest, tightest, most stock) marked with a trophy. Avg
+          Velocity/SD/ES show how many shots they're based on — a small sample can look better or
+          worse than the load actually is. No chart here; for a charge-weight-vs-velocity ladder
+          chart, use a Load Workup instead.
         </InfoTooltip>
       </div>
 
@@ -373,6 +391,13 @@ export default function ComparePage({ authUser }) {
                         }
                         const value = row.get(detail);
                         const isWinner = winnerIds.has(r.id);
+                        // Shot count backing this stat, only for the
+                        // sampleSize-flagged rows — see SMALL_SAMPLE_THRESHOLD
+                        // above. `shots` is the latest range session's
+                        // per-shot velocity log (same array Avg
+                        // Velocity/SD/ES are all computed from), so its
+                        // length is exactly the sample size behind this cell.
+                        const shotCount = row.sampleSize ? (detail.shots?.length ?? 0) : null;
                         return (
                           <td
                             key={r.id}
@@ -388,6 +413,16 @@ export default function ComparePage({ authUser }) {
                               {isWinner && <Trophy size={11} className="shrink-0 text-emerald-400" />}
                               {row.format(value)}
                             </span>
+                            {shotCount > 0 && (
+                              <div
+                                className={`mt-0.5 text-[10px] font-normal ${
+                                  shotCount < SMALL_SAMPLE_THRESHOLD ? 'text-amber-500' : 'text-slate-500'
+                                }`}
+                              >
+                                n={shotCount} shot{shotCount === 1 ? '' : 's'}
+                                {shotCount < SMALL_SAMPLE_THRESHOLD ? ' · small sample' : ''}
+                              </div>
+                            )}
                           </td>
                         );
                       })}
