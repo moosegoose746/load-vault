@@ -696,6 +696,19 @@ function NumCell({ children }) {
   return <td className="px-2 py-1.5 text-right font-mono text-xs text-slate-200" style={{ fontVariantNumeric: 'tabular-nums' }}>{children}</td>;
 }
 
+// Same label/value pair as a NumCell, just stacked for the mobile rung
+// card layout instead of a table cell.
+function RungStat({ label, value }) {
+  return (
+    <div className="flex flex-col">
+      <span className="font-mono text-[9px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="font-mono text-xs text-slate-200" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
   const [workup, setWorkup] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -808,60 +821,106 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
                   No rungs yet — add your first charge weight below.
                 </p>
               ) : (
-                <div className="overflow-x-auto rounded border border-slate-800">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-800 bg-slate-900/60 font-mono text-[10px] uppercase tracking-wide text-slate-500">
-                        <th className="px-2 py-1.5 text-left">Charge</th>
-                        <th className="px-2 py-1.5 text-right">Avg FPS</th>
-                        <th className="px-2 py-1.5 text-right">SD</th>
-                        <th className="px-2 py-1.5 text-right">ES</th>
-                        <th className="px-2 py-1.5 text-right">Group</th>
-                        <th className="px-2 py-1.5 text-right">Dist</th>
-                        <th className="px-2 py-1.5 text-right">Rounds</th>
-                        <th className="px-2 py-1.5 text-left">Notes</th>
-                        <th className="px-2 py-1.5" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {workup.rungs.map((rung) => (
-                        <tr key={rung.id} className="border-b border-slate-800/60 last:border-0">
-                          <td className="px-2 py-1.5 font-mono text-xs font-semibold text-slate-100">
-                            {rung.chargeGrains} gr
-                          </td>
-                          <NumCell>{rung.avgVelocity ?? '—'}</NumCell>
-                          <NumCell>{rung.stdDevFps ?? '—'}</NumCell>
-                          <NumCell>{rung.extremeSpread ?? '—'}</NumCell>
-                          <NumCell>{rung.groupSizeMoa != null ? rung.groupSizeMoa.toFixed(2) : '—'}</NumCell>
-                          <NumCell>
-                            {rung.distanceYards != null ? (
-                              `${rung.distanceYards}yd`
-                            ) : rung.groupSizeMoa != null ? (
-                              <span className="text-amber-500" title="Distance wasn't recorded for this rung">
-                                unknown
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </NumCell>
-                          <NumCell>{rung.roundsFired ?? '—'}</NumCell>
-                          <td className="max-w-[10rem] truncate px-2 py-1.5 font-mono text-xs text-slate-500" title={rung.notes}>
-                            {rung.notes || '—'}
-                          </td>
-                          <td className="px-2 py-1.5 text-right">
-                            <button
-                              onClick={() => handleDeleteRung(rung.id)}
-                              className="text-slate-600 hover:text-red-400"
-                              title="Delete rung"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </td>
+                <>
+                  {/* Mobile: one stacked card per rung, same fields as the
+                      table below but reflowed instead of horizontally
+                      scrolled — the table's 9 columns get cramped well
+                      before this app's other sm: breakpoints kick in. */}
+                  <div className="flex flex-col gap-2 sm:hidden">
+                    {workup.rungs.map((rung) => (
+                      <div key={rung.id} className="rounded border border-slate-800 bg-slate-900/40 p-3">
+                        <div className="flex items-start justify-between">
+                          <span className="font-mono text-sm font-semibold text-slate-100">{rung.chargeGrains} gr</span>
+                          <button
+                            onClick={() => handleDeleteRung(rung.id)}
+                            className="text-slate-600 hover:text-red-400"
+                            title="Delete rung"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-2">
+                          <RungStat label="Avg FPS" value={rung.avgVelocity ?? '—'} />
+                          <RungStat label="SD" value={rung.stdDevFps ?? '—'} />
+                          <RungStat label="ES" value={rung.extremeSpread ?? '—'} />
+                          <RungStat label="Group" value={rung.groupSizeMoa != null ? rung.groupSizeMoa.toFixed(2) : '—'} />
+                          <RungStat
+                            label="Dist"
+                            value={
+                              rung.distanceYards != null ? (
+                                `${rung.distanceYards}yd`
+                              ) : rung.groupSizeMoa != null ? (
+                                <span className="text-amber-500">unknown</span>
+                              ) : (
+                                '—'
+                              )
+                            }
+                          />
+                          <RungStat label="Rounds" value={rung.roundsFired ?? '—'} />
+                        </div>
+                        {rung.notes && (
+                          <p className="mt-2 whitespace-pre-wrap font-mono text-xs text-slate-500">{rung.notes}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop/tablet: the original table, unchanged. */}
+                  <div className="hidden overflow-x-auto rounded border border-slate-800 sm:block">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-900/60 font-mono text-[10px] uppercase tracking-wide text-slate-500">
+                          <th className="px-2 py-1.5 text-left">Charge</th>
+                          <th className="px-2 py-1.5 text-right">Avg FPS</th>
+                          <th className="px-2 py-1.5 text-right">SD</th>
+                          <th className="px-2 py-1.5 text-right">ES</th>
+                          <th className="px-2 py-1.5 text-right">Group</th>
+                          <th className="px-2 py-1.5 text-right">Dist</th>
+                          <th className="px-2 py-1.5 text-right">Rounds</th>
+                          <th className="px-2 py-1.5 text-left">Notes</th>
+                          <th className="px-2 py-1.5" />
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {workup.rungs.map((rung) => (
+                          <tr key={rung.id} className="border-b border-slate-800/60 last:border-0">
+                            <td className="px-2 py-1.5 font-mono text-xs font-semibold text-slate-100">
+                              {rung.chargeGrains} gr
+                            </td>
+                            <NumCell>{rung.avgVelocity ?? '—'}</NumCell>
+                            <NumCell>{rung.stdDevFps ?? '—'}</NumCell>
+                            <NumCell>{rung.extremeSpread ?? '—'}</NumCell>
+                            <NumCell>{rung.groupSizeMoa != null ? rung.groupSizeMoa.toFixed(2) : '—'}</NumCell>
+                            <NumCell>
+                              {rung.distanceYards != null ? (
+                                `${rung.distanceYards}yd`
+                              ) : rung.groupSizeMoa != null ? (
+                                <span className="text-amber-500" title="Distance wasn't recorded for this rung">
+                                  unknown
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </NumCell>
+                            <NumCell>{rung.roundsFired ?? '—'}</NumCell>
+                            <td className="max-w-[10rem] truncate px-2 py-1.5 font-mono text-xs text-slate-500" title={rung.notes}>
+                              {rung.notes || '—'}
+                            </td>
+                            <td className="px-2 py-1.5 text-right">
+                              <button
+                                onClick={() => handleDeleteRung(rung.id)}
+                                className="text-slate-600 hover:text-red-400"
+                                title="Delete rung"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
 

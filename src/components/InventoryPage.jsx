@@ -109,6 +109,354 @@ function formatCostPerUnit(unitCost, packageQty, isPowder) {
   return `$${perUnit.toFixed(isPowder ? 4 : 3)}`;
 }
 
+function Field({ label, className = '', children }) {
+  return (
+    <label className={`flex flex-col gap-1 ${className}`}>
+      <span className="font-mono text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// Mobile stand-in for one <tr> of the desktop table below — same fields,
+// same drafts/handlers passed straight through from InventoryPage, just
+// stacked in a card instead of packed into a 7-9 column row. A table with
+// this many columns has no good reflow short of this: cards are the
+// standard mobile pattern for "a spreadsheet row with several fields."
+function InventoryRowCard({
+  row,
+  draft,
+  updateDraft,
+  rstatus,
+  rowError,
+  lowStock,
+  nearingRetirement,
+  brassAllocation,
+  isPowder,
+  hasCaliber,
+  hasPrimerSize,
+  type,
+  calibers,
+  onSave,
+  onDelete,
+}) {
+  const displayName = row.component ? `${row.component.brand} ${row.component.model}` : row.custom_name;
+  return (
+    <div className="rounded border border-slate-800 bg-panel p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="text-sm text-slate-100">{displayName}</span>
+          {!row.component && (
+            <span className="ml-2 rounded border border-slate-700 px-1.5 py-0.5 text-[9px] uppercase text-slate-500">
+              custom
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={onSave}
+            disabled={rstatus === 'saving'}
+            className="flex items-center gap-1 rounded border border-amber-500 px-2 py-1 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+            title="Save"
+          >
+            <Check size={13} />
+            {rstatus === 'saving' ? '…' : rstatus === 'saved' ? 'OK' : ''}
+          </button>
+          <button
+            onClick={onDelete}
+            className="flex items-center gap-1 rounded border border-slate-800 px-2 py-1 text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
+            title="Delete"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {hasCaliber && (
+          <Field label="Caliber">
+            <select
+              value={draft.caliberId}
+              onChange={(e) => updateDraft(row.id, 'caliberId', e.target.value)}
+              className={inputClass}
+            >
+              <option value="">Select…</option>
+              {calibers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {hasPrimerSize && (
+          <Field label="Primer Size">
+            <select
+              value={PRIMER_SIZES.includes(draft.primerSize) ? draft.primerSize : draft.primerSize ? PRIMER_OTHER : ''}
+              onChange={(e) => updateDraft(row.id, 'primerSize', e.target.value === PRIMER_OTHER ? PRIMER_OTHER : e.target.value)}
+              className={inputClass}
+            >
+              <option value="">Select…</option>
+              {PRIMER_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+              <option value={PRIMER_OTHER}>Other…</option>
+            </select>
+            {draft.primerSize && !PRIMER_SIZES.includes(draft.primerSize) && (
+              <input
+                type="text"
+                placeholder="Custom primer size"
+                value={draft.primerSize === PRIMER_OTHER ? '' : draft.primerSize}
+                onChange={(e) => updateDraft(row.id, 'primerSize', e.target.value)}
+                className={`${inputClass} mt-1`}
+              />
+            )}
+          </Field>
+        )}
+        <Field label="Purchase Price ($)">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={draft.unitCost}
+            onChange={(e) => updateDraft(row.id, 'unitCost', e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label={isPowder ? 'Container Wt (lbs)' : 'Qty per Package'}>
+          <input
+            type="number"
+            step={isPowder ? '0.1' : '1'}
+            min={isPowder ? '0.1' : '1'}
+            value={draft.packageQty}
+            onChange={(e) => updateDraft(row.id, 'packageQty', e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label={isPowder ? 'Cost/Grain' : 'Cost/Unit'}>
+          <p className="px-0.5 py-1.5 font-mono text-sm text-slate-400">
+            {formatCostPerUnit(
+              Number.parseFloat(draft.unitCost),
+              isPowder ? Number.parseFloat(draft.packageQty) * GRAINS_PER_LB : Number.parseFloat(draft.packageQty),
+              isPowder
+            )}
+          </p>
+        </Field>
+        <Field label={`Qty On Hand${isPowder ? ' (lbs)' : ''}`}>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            placeholder="optional"
+            value={draft.quantityOnHand}
+            onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        {type === 'brass' && (
+          <>
+            <Field label="Reload Cycles (est.)">
+              <input
+                type="number"
+                step="1"
+                min="1"
+                placeholder="1"
+                value={draft.reloadCycles}
+                onChange={(e) => updateDraft(row.id, 'reloadCycles', e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Cycles Used">
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={draft.cyclesUsed}
+                onChange={(e) => updateDraft(row.id, 'cyclesUsed', e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+          </>
+        )}
+      </div>
+
+      {lowStock && (
+        <p className="mt-2 flex items-center gap-1 text-[10px] text-amber-400">
+          <AlertTriangle size={10} />
+          Running low
+        </p>
+      )}
+      {type === 'brass' && brassAllocation?.currentlyLoaded > 0 && (
+        <p className="mt-1 text-[10px] text-slate-500">
+          {brassAllocation.availableToLoad} available to load ({brassAllocation.currentlyLoaded} currently loaded)
+        </p>
+      )}
+      {type === 'brass' && brassAllocation?.exceedsOnHand > 0 && (
+        <p className="mt-1 flex items-center gap-1 text-[10px] text-amber-400">
+          <AlertTriangle size={10} />
+          {brassAllocation.exceedsOnHand} more loaded than cases on record for this caliber
+        </p>
+      )}
+      {type === 'brass' && nearingRetirement && (
+        <p className="mt-1 flex items-center gap-1 text-[10px] text-amber-400">
+          <AlertTriangle size={10} />
+          Nearing max — inspect/retire
+        </p>
+      )}
+      {rstatus === 'invalid' && (
+        <p className="mt-2 text-[10px] text-red-400">Check purchase price / qty per package</p>
+      )}
+      {rstatus === 'error' && (
+        <p className="mt-2 text-[10px] text-red-400">{rowError || 'Failed to save — please try again.'}</p>
+      )}
+    </div>
+  );
+}
+
+// Mobile stand-in for the desktop table's trailing "add row" <tr> — same
+// newRow state/setters/handler passed straight through, just stacked.
+function InventoryAddRowCard({
+  type,
+  label,
+  isPowder,
+  hasCaliber,
+  hasPrimerSize,
+  calibers,
+  componentsByType,
+  newRow,
+  setNewRows,
+  status,
+  addError,
+  onAdd,
+}) {
+  const setField = (field, value) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], [field]: value } }));
+  return (
+    <div className="rounded border border-dashed border-slate-700 bg-panel/60 p-3">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Component" className="col-span-2">
+          {newRow.componentId === CUSTOM_VALUE ? (
+            <input
+              type="text"
+              placeholder={`Type your own ${label.toLowerCase()} name`}
+              value={newRow.customName}
+              onChange={(e) => setField('customName', e.target.value)}
+              className={inputClass}
+            />
+          ) : (
+            <select value={newRow.componentId} onChange={(e) => setField('componentId', e.target.value)} className={inputClass}>
+              <option value="">Select {label.toLowerCase()}…</option>
+              {componentsByType[type].map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.brand} {c.model}
+                </option>
+              ))}
+              <option value={CUSTOM_VALUE}>+ Type your own…</option>
+            </select>
+          )}
+        </Field>
+        {hasCaliber && (
+          <Field label="Caliber">
+            <select value={newRow.caliberId} onChange={(e) => setField('caliberId', e.target.value)} className={inputClass}>
+              <option value="">Select…</option>
+              {calibers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {hasPrimerSize && (
+          <Field label="Primer Size">
+            <select
+              value={PRIMER_SIZES.includes(newRow.primerSize) ? newRow.primerSize : newRow.primerSize ? PRIMER_OTHER : ''}
+              onChange={(e) => setField('primerSize', e.target.value === PRIMER_OTHER ? PRIMER_OTHER : e.target.value)}
+              className={inputClass}
+            >
+              <option value="">Select…</option>
+              {PRIMER_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+              <option value={PRIMER_OTHER}>Other…</option>
+            </select>
+            {newRow.primerSize && !PRIMER_SIZES.includes(newRow.primerSize) && (
+              <input
+                type="text"
+                placeholder="Custom primer size"
+                value={newRow.primerSize === PRIMER_OTHER ? '' : newRow.primerSize}
+                onChange={(e) => setField('primerSize', e.target.value)}
+                className={`${inputClass} mt-1`}
+              />
+            )}
+          </Field>
+        )}
+        <Field label="Purchase Price ($)">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            value={newRow.unitCost}
+            onChange={(e) => setField('unitCost', e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label={isPowder ? 'Container Wt (lbs)' : 'Qty per Package'}>
+          <input
+            type="number"
+            step={isPowder ? '0.1' : '1'}
+            min={isPowder ? '0.1' : '1'}
+            placeholder="0"
+            value={newRow.packageQty}
+            onChange={(e) => setField('packageQty', e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label={`Qty On Hand${isPowder ? ' (lbs)' : ''}`}>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            placeholder="optional"
+            value={newRow.quantityOnHand}
+            onChange={(e) => setField('quantityOnHand', e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        {type === 'brass' && (
+          <Field label="Reload Cycles (est.)">
+            <input
+              type="number"
+              step="1"
+              min="1"
+              placeholder="1"
+              value={newRow.reloadCycles}
+              onChange={(e) => setField('reloadCycles', e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        )}
+      </div>
+      <button
+        onClick={onAdd}
+        disabled={status === 'saving'}
+        className="mt-3 flex items-center gap-1 rounded border border-amber-500 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+      >
+        <Plus size={13} />
+        {status === 'saving' ? '…' : `ADD ${label.toUpperCase()}`}
+      </button>
+      {status === 'invalid' && <p className="mt-1 text-[10px] text-red-400">Check the fields above</p>}
+      {status === 'error' && (
+        <p className="mt-1 text-[10px] text-red-400">{addError || 'Failed to save — please try again.'}</p>
+      )}
+    </div>
+  );
+}
+
 // Section 6 of the master doc: "Unit Economics & Inventory Analytics" —
 // personal component pricing (never the shared catalog's placeholder
 // prices) and stock, grouped by component type so each section's columns
@@ -333,7 +681,57 @@ export default function InventoryPage({ authUser }) {
           return (
             <div key={type} className="mb-8">
               <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">{label}</h2>
-              <div className="overflow-x-auto rounded border border-slate-800">
+
+              {/* Mobile: stacked cards — a 7-9 column spreadsheet row has no
+                  good reflow, so this is a parallel render of the same
+                  rows/handlers as the table below, not a derived view. */}
+              <div className="flex flex-col gap-3 sm:hidden">
+                {sectionRows.length === 0 && (
+                  <p className="rounded border border-slate-800 bg-panel px-3 py-3 text-center text-xs text-slate-600">
+                    No {label.toLowerCase()} tracked yet.
+                  </p>
+                )}
+                {sectionRows.map((row) => {
+                  const draft = drafts[row.id] ?? draftFromRow(row, isPowder);
+                  return (
+                    <InventoryRowCard
+                      key={row.id}
+                      row={row}
+                      draft={draft}
+                      updateDraft={updateDraft}
+                      rstatus={rowStatus[row.id]}
+                      rowError={rowError[row.id]}
+                      lowStock={isLowStock(row)}
+                      nearingRetirement={type === 'brass' && isBrassNearingRetirement(row)}
+                      brassAllocation={brassAllocationByRowId[row.id]}
+                      isPowder={isPowder}
+                      hasCaliber={hasCaliber}
+                      hasPrimerSize={hasPrimerSize}
+                      type={type}
+                      calibers={calibers}
+                      onSave={() => handleSaveRow(row)}
+                      onDelete={() => handleDeleteRow(row.id)}
+                    />
+                  );
+                })}
+                <InventoryAddRowCard
+                  type={type}
+                  label={label}
+                  isPowder={isPowder}
+                  hasCaliber={hasCaliber}
+                  hasPrimerSize={hasPrimerSize}
+                  calibers={calibers}
+                  componentsByType={componentsByType}
+                  newRow={newRow}
+                  setNewRows={setNewRows}
+                  status={status}
+                  addError={addError[type]}
+                  onAdd={() => handleAddRow(type)}
+                />
+              </div>
+
+              {/* Desktop/tablet: the original spreadsheet-style table. */}
+              <div className="hidden overflow-x-auto rounded border border-slate-800 sm:block">
                 <table className="w-full min-w-[760px] border-collapse font-mono text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 bg-panel text-left text-[10px] uppercase tracking-widest text-slate-500">
