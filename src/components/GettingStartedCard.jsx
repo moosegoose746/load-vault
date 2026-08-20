@@ -8,7 +8,12 @@ import { Check, Circle, X } from 'lucide-react';
 // the order and jump straight to "New Recipe" if they want to.
 const STEPS = [
   { key: 'firearm', label: 'Add a firearm', view: 'firearms' },
-  { key: 'inventory', label: 'Price your inventory', view: 'inventory' },
+  {
+    key: 'inventory',
+    label: 'Set up your inventory',
+    subtitle: 'Adding what you paid is optional, but it’s what your Cost/Round is calculated from.',
+    view: 'inventory',
+  },
   { key: 'recipe', label: 'Create your first recipe', view: 'vault' },
 ];
 
@@ -55,8 +60,11 @@ export default function GettingStartedCard({ hasFirearm, hasInventory, hasRecipe
             ) : (
               <Circle size={16} className="shrink-0 text-slate-600" />
             )}
-            <span className={`font-mono text-xs ${done[step.key] ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
-              {step.label}
+            <span className="flex flex-col">
+              <span className={`font-mono text-xs ${done[step.key] ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                {step.label}
+              </span>
+              {step.subtitle && !done[step.key] && <span className="mt-0.5 text-[10px] text-slate-500">{step.subtitle}</span>}
             </span>
           </button>
         ))}
