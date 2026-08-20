@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Beaker, Boxes, ChevronRight, Crosshair, Info, NotebookPen, Save, Share2, SlidersHorizontal } from 'lucide-react';
+import {
+  AlertTriangle,
+  Beaker,
+  Boxes,
+  ChevronRight,
+  Crosshair,
+  Info,
+  NotebookPen,
+  Pencil,
+  Save,
+  Share2,
+  SlidersHorizontal,
+  Trash2,
+} from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
@@ -65,8 +78,18 @@ const TABS = [
   },
 ];
 
-export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionSaved, onTargetChange, onOpenWorkup }) {
+export default function Dashboard({
+  recipe,
+  activeRecipeId,
+  authUser,
+  onSessionSaved,
+  onTargetChange,
+  onOpenWorkup,
+  onEditRecipe,
+  onDeleteRecipe,
+}) {
   const [dashboardTab, setDashboardTab] = useState('overview');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [target, setTarget] = useState({ imageEl: null, imageBlob: null, shots: [], moa: null, groupInches: null });
   const [chronoShots, setChronoShots] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -528,6 +551,49 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
             start tracking real loads.
           </p>
         )}
+
+        {/* Edit/Delete live here, right under the title of whichever
+            recipe they'd actually act on, instead of in the Sidebar —
+            they're about managing THIS recipe, not about browsing for a
+            different one, and keeping them here means they no longer
+            shift position as the Sidebar's filtered recipe list changes
+            height. Only for a real recipe; there's nothing to edit or
+            delete on the demo. */}
+        {isRealRecipe &&
+          (confirmingDelete ? (
+            <div className="mt-1 flex items-center gap-2">
+              <span className="font-mono text-xs text-slate-400">Delete this recipe?</span>
+              <button
+                onClick={() => onDeleteRecipe?.(activeRecipeId)}
+                className="flex items-center gap-1.5 rounded border border-red-600 bg-red-950 px-3 py-1.5 font-mono text-xs text-red-300 hover:bg-red-900"
+              >
+                CONFIRM DELETE
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                className="rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-slate-500"
+              >
+                CANCEL
+              </button>
+            </div>
+          ) : (
+            <div className="mt-1 flex gap-2">
+              <button
+                onClick={() => onEditRecipe?.(activeRecipeId)}
+                className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+              >
+                <Pencil size={13} />
+                EDIT RECIPE
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                className="flex items-center gap-1.5 rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
+              >
+                <Trash2 size={13} />
+                DELETE RECIPE
+              </button>
+            </div>
+          ))}
       </div>
 
       <div className="mb-4 flex gap-2 border-b border-slate-800">

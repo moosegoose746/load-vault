@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownNarrowWide, Pencil, Plus } from 'lucide-react';
 import MoaBadge from './MoaBadge.jsx';
 import InfoTooltip from './InfoTooltip.jsx';
 import { updateRecipeFactoryPrice } from '../lib/recipes.js';
@@ -212,24 +212,15 @@ export default function Sidebar({
   activeRecipeId,
   onSelectRecipe,
   onNewRecipe,
-  onEditRecipe,
-  onDeleteRecipe,
   onRecipeUpdated,
   onViewArchived,
   liveMoa,
   liveDistanceYards,
 }) {
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [caliberFilter, setCaliberFilter] = useState('');
   const [firearmFilter, setFirearmFilter] = useState('');
   const [componentFilter, setComponentFilter] = useState('');
   const [sortByMoa, setSortByMoa] = useState(false);
-
-  // Drop any pending delete confirmation if the selected recipe changes out
-  // from under it (e.g. switching recipes mid-confirm).
-  useEffect(() => {
-    setConfirmingDelete(false);
-  }, [activeRecipeId]);
 
   // Only surface the filter row once there's actually enough recipes for
   // scanning a plain dropdown to get tedious — for a handful of recipes
@@ -303,6 +294,20 @@ export default function Sidebar({
 
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>
+
+        {/* Fixed at the top, above the filter card and the list — Edit and
+            Delete moved to Dashboard.jsx (they act on whichever recipe is
+            currently open, so they now live right under that recipe's own
+            title instead of down here). New Recipe doesn't depend on
+            anything below it, so anchoring it here keeps it from jumping
+            around as the list's height changes with the filter results. */}
+        <button
+          onClick={onNewRecipe}
+          className="flex items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+        >
+          <Plus size={14} />
+          NEW RECIPE
+        </button>
 
         {/* Its own clearly-labeled card, separate from the recipe list
             below — narrowing/sorting and "which recipe is open" are two
@@ -434,51 +439,6 @@ export default function Sidebar({
             <p className="p-2 text-center font-mono text-[11px] text-slate-500">No recipes match these filters</p>
           )}
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onNewRecipe}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
-          >
-            <Plus size={14} />
-            NEW RECIPE
-          </button>
-          {activeRecipeId && (
-            <button
-              onClick={() => onEditRecipe?.(activeRecipeId)}
-              title="Edit this recipe"
-              aria-label="Edit this recipe"
-              className="flex items-center justify-center rounded border border-slate-700 px-3 py-1.5 text-slate-300 hover:border-amber-500 hover:text-amber-400"
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-        </div>
-
-        {activeRecipeId &&
-          (confirmingDelete ? (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onDeleteRecipe(activeRecipeId)}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded border border-red-600 bg-red-950 px-3 py-1.5 font-mono text-xs text-red-300 hover:bg-red-900"
-              >
-                CONFIRM DELETE
-              </button>
-              <button
-                onClick={() => setConfirmingDelete(false)}
-                className="rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-slate-500"
-              >
-                CANCEL
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmingDelete(true)}
-              className="flex items-center justify-center gap-1.5 rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-500 hover:border-red-700 hover:text-red-400"
-            >
-              <Trash2 size={14} />
-              DELETE RECIPE
-            </button>
-          ))}
 
         {/* Deleting a recipe is a soft delete (see archiveRecipe in
             lib/recipes.js) — this is the way back to it. Always shown,

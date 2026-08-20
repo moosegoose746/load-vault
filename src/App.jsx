@@ -370,11 +370,6 @@ function AppShell() {
                 setRecipeFormMode('create');
                 setRecipeFormOpen(true);
               }}
-              onEditRecipe={() => {
-                setRecipeFormMode('edit');
-                setRecipeFormOpen(true);
-              }}
-              onDeleteRecipe={handleDeleteRecipe}
               onRecipeUpdated={handleRecipeDataChanged}
               onViewArchived={() => setArchivedModalOpen(true)}
               liveMoa={liveMoa}
@@ -394,6 +389,11 @@ function AppShell() {
                 setPendingWorkupId(workupId);
                 setView('workups');
               }}
+              onEditRecipe={() => {
+                setRecipeFormMode('edit');
+                setRecipeFormOpen(true);
+              }}
+              onDeleteRecipe={handleDeleteRecipe}
             />
           </div>
           </>
