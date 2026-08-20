@@ -14,7 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
-import MoaBadge from './MoaBadge.jsx';
+import RecipeHeroCard from './RecipeHeroCard.jsx';
 import RecipeSpecsCard from './RecipeSpecsCard.jsx';
 import MoneySavedCard from './MoneySavedCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
@@ -632,19 +632,23 @@ export default function Dashboard({
           switched away from Range Day and back. */}
       <div className={dashboardTab === 'overview' ? 'flex flex-col gap-4' : 'hidden'}>
           {/* Moved here from the Sidebar (see the sidebar redesign
-              discussion in the progress log) — it's the headline number
+              discussion in the progress log) — it's the headline numbers
               for whichever recipe is open, same as everything else on this
               tab, so it belongs at the top of that recipe's own content
               rather than pinned in a persistent side panel. Still updates
               live off shots being plotted on Range Day even while sitting
-              on this Overview tab, same as before (see displayMoa above). */}
-          <MoaBadge moa={displayMoa} distanceYards={displayDistanceYards} />
-
-          <div className="grid grid-cols-3 gap-3">
-            <MetricCard value={displayAvgVelocity} unit="FPS" label="Avg FPS" />
-            <MetricCard value={displayStdDevFps} unit="FPS" label="FPS SD" />
-            <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
-          </div>
+              on this Overview tab, same as before (see displayMoa above).
+              MOA and the three FPS stats used to be a tall badge stacked
+              above a separate 3-card row — merged into one RecipeHeroCard
+              (see progress log) to cut down how long this tab was getting,
+              without losing any of the numbers themselves. */}
+          <RecipeHeroCard
+            moa={displayMoa}
+            distanceYards={displayDistanceYards}
+            avgVelocity={displayAvgVelocity}
+            stdDevFps={displayStdDevFps}
+            extremeSpread={displayExtremeSpread}
+          />
 
           {/* Split into two rows by kind, rather than one crowded row of
               five: Loaded & Ready and Loadable From Stock are both raw

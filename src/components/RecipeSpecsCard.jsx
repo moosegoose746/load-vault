@@ -17,9 +17,18 @@ import InfoTooltip from './InfoTooltip.jsx';
 // center against the now-taller wrapped value instead of staying pinned
 // to its first line. text-right on the value keeps wrapped lines readable
 // instead of straddling the row's center.
+//
+// No border-b here anymore — this used to be a single stacked column
+// where a bottom border under every row (last one excepted) read as a
+// clean divided list. Once the rows moved into a 2-column grid below, that
+// same border trick left an odd half-drawn line under whichever row
+// landed at the bottom of the shorter column (an uneven number of specs
+// doesn't split evenly into two equal-length columns). Spacing from the
+// grid's own gap does the same visual separation job without that
+// asymmetry.
 export function SpecRow({ label, value, info }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-800 py-2 last:border-none">
+    <div className="flex items-start justify-between gap-3 py-1">
       <span className="flex shrink-0 items-center whitespace-nowrap text-xs text-slate-400">
         {label}
         {info && <InfoTooltip align="left">{info}</InfoTooltip>}
@@ -33,18 +42,22 @@ export default function RecipeSpecsCard({ recipe }) {
   return (
     <div className="flex flex-col rounded border border-slate-800 bg-panel p-3">
       <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-amber-400">Component Specs</h2>
-      {/* Charge Weight right under Powder — it's a property of the powder
-          charge, so it reads more naturally directly below it than
-          separated by Bullet. The value also doesn't repeat the powder
-          name (e.g. "25 gr Hodgon H4350") — that's redundant with the
-          Powder row directly above it, just "25 gr" now. */}
-      <SpecRow label="Caliber" value={recipe.caliber} />
-      <SpecRow label="Powder" value={recipe.powder} />
-      <SpecRow label="Charge Weight" value={recipe.chargeGrains != null ? `${recipe.chargeGrains} gr` : '—'} />
-      <SpecRow label="Bullet" value={recipe.bullet} />
-      <SpecRow label="COAL" value={recipe.coalInches ? `${recipe.coalInches}"` : '—'} />
-      <SpecRow label="Primer" value={recipe.primer} />
-      <SpecRow label="Brass" value={recipe.brass} />
+      {/* 2 columns instead of one long stacked list — same 7 pieces of
+          info, roughly 40% shorter top-to-bottom. Paired so each row keeps
+          a sensible grouping: Charge Weight next to Powder's row (it's a
+          property of the charge, reads naturally beside it), Bullet/COAL
+          together (both about the projectile), Primer/Brass together.
+          Brass ends up alone on the last row since 7 is odd — left as-is
+          rather than forcing an 8th filler item. */}
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+        <SpecRow label="Caliber" value={recipe.caliber} />
+        <SpecRow label="Powder" value={recipe.powder} />
+        <SpecRow label="Charge Weight" value={recipe.chargeGrains != null ? `${recipe.chargeGrains} gr` : '—'} />
+        <SpecRow label="Bullet" value={recipe.bullet} />
+        <SpecRow label="COAL" value={recipe.coalInches ? `${recipe.coalInches}"` : '—'} />
+        <SpecRow label="Primer" value={recipe.primer} />
+        <SpecRow label="Brass" value={recipe.brass} />
+      </div>
     </div>
   );
 }
