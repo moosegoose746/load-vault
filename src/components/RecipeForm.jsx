@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Copy, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, ShieldAlert, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
+import SafetyBasicsModal from './SafetyBasicsModal.jsx';
 import {
   createRecipe,
   updateRecipe,
@@ -106,8 +107,29 @@ const WORKUP_MATCH_FIELDS = ['caliberId', 'powderId', 'bulletId', 'primerId', 'b
 // bypass only skips the sign-in *screen*, it doesn't forge a real
 // Supabase session, so this form is disabled when there's no real
 // authUser even if the UI otherwise looks signed in.
-export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUser, editingRecipe }) {
+export default function RecipeForm({
+  open,
+  onClose,
+  onCreated,
+  onUpdated,
+  authUser,
+  editingRecipe,
+  isFirstRecipe = false,
+}) {
   const isEditing = Boolean(editingRecipe);
+  const [safetyOpen, setSafetyOpen] = useState(false);
+
+  // Auto-open the Safety Basics popup exactly once per modal-open, only
+  // for a brand-new account's very first "New Recipe" (never in edit
+  // mode — an edit means at least one recipe already exists). Keyed off
+  // `open` itself (not e.g. a ref) so it re-triggers correctly if this
+  // same first-time user closes and reopens the form before actually
+  // saving anything.
+  useEffect(() => {
+    if (open && !isEditing && isFirstRecipe) {
+      setSafetyOpen(true);
+    }
+  }, [open, isEditing, isFirstRecipe]);
 
   const [calibers, setCalibers] = useState([]);
   const [powders, setPowders] = useState([]);
@@ -315,7 +337,8 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">
+    <>
+      <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded border border-slate-800 bg-panel p-5">
         <div className="flex items-center justify-between">
           <h2 className="font-mono text-sm uppercase tracking-widest text-amber-400">
@@ -534,9 +557,21 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
                 {submitting ? 'SAVING…' : isEditing ? 'SAVE CHANGES' : 'SAVE RECIPE'}
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => setSafetyOpen(true)}
+              className="flex items-center justify-center gap-1.5 self-center font-mono text-[10px] uppercase tracking-wide text-slate-500 hover:text-amber-400"
+            >
+              <ShieldAlert size={11} />
+              Reloading safety basics
+            </button>
           </form>
         )}
       </div>
-    </div>
+      </div>
+
+      <SafetyBasicsModal open={safetyOpen} onClose={() => setSafetyOpen(false)} />
+    </>
   );
 }

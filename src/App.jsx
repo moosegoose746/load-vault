@@ -340,6 +340,12 @@ function AppShell() {
       <RecipeForm
         open={recipeFormOpen}
         editingRecipe={recipeFormMode === 'edit' ? activeRecipe : null}
+        // See SafetyBasicsModal.jsx: auto-opens the safety content once,
+        // the very first time a brand-new account creates its first
+        // recipe. "Zero recipes saved yet" is the trigger — no separate
+        // DB flag needed, and it stops auto-showing the moment that's no
+        // longer true.
+        isFirstRecipe={userRecipes.length === 0}
         onClose={() => {
           setRecipeFormOpen(false);
           setRecipeFormMode('create');

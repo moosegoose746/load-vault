@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Beaker, Download, Plus, Trash2, X } from 'lucide-react';
+import { Beaker, Download, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
+import SafetyBasicsModal from './SafetyBasicsModal.jsx';
 import WorkupChart from './WorkupChart.jsx';
 import {
   addWorkupRung,
@@ -705,6 +706,7 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
   // reasoning. Defaults to Manual so existing muscle memory doesn't
   // change for anyone who hasn't used Import yet.
   const [addMode, setAddMode] = useState('manual'); // 'manual' | 'import'
+  const [safetyOpen, setSafetyOpen] = useState(false);
 
   const reload = () => {
     if (!workupId) return;
@@ -751,6 +753,7 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
     : '';
 
   return (
+    <>
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
@@ -889,6 +892,14 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
               ) : (
                 <ImportRungForm workup={workup} userId={authUser?.id} onAdded={reload} />
               )}
+              <button
+                type="button"
+                onClick={() => setSafetyOpen(true)}
+                className="mt-2 flex items-center gap-1.5 self-center font-mono text-[10px] uppercase tracking-wide text-slate-500 hover:text-amber-400"
+              >
+                <ShieldAlert size={11} />
+                Reloading safety basics
+              </button>
             </div>
 
             <div className="mt-1 flex items-center gap-2 border-t border-slate-800 pt-3">
@@ -922,6 +933,9 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
         )}
       </div>
     </div>
+
+    <SafetyBasicsModal open={safetyOpen} onClose={() => setSafetyOpen(false)} />
+    </>
   );
 }
 
