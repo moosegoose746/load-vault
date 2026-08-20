@@ -3,6 +3,7 @@ import { AlertTriangle, Camera, Plus, Target, Trash2, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
 import {
   barrelLifePercentUsed,
+  countFirearmReferences,
   createFirearm,
   deleteFirearm,
   fetchFirearmStats,
@@ -429,9 +430,24 @@ function FirearmDetailModal({ open, firearm, roundsFiredByFirearm, onClose, onEd
 
 function FirearmCard({ firearm, roundsFiredByFirearm, onOpen, onEdit, onDelete }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteRefs, setDeleteRefs] = useState(null);
+  const [deleteRefsLoading, setDeleteRefsLoading] = useState(false);
   const totalRounds = totalRoundsForFirearm(firearm, roundsFiredByFirearm);
   const percentUsed = barrelLifePercentUsed(firearm, totalRounds);
   const nearing = isNearingBarrelLife(firearm, totalRounds);
+
+  // Look up how many recipes/sessions reference this firearm right when
+  // the user starts confirming delete, not up front for every card — most
+  // visits to this page never delete anything, so this stays a one-off
+  // query rather than N extra queries on every page load.
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    setDeleteRefsLoading(true);
+    countFirearmReferences(firearm.id)
+      .then(setDeleteRefs)
+      .catch(() => setDeleteRefs(null))
+      .finally(() => setDeleteRefsLoading(false));
+  }, [confirmingDelete, firearm.id]);
 
   const detailLine = [firearm.make, firearm.model].filter(Boolean).join(' ');
   const barrelLine = [
@@ -503,6 +519,16 @@ function FirearmCard({ firearm, roundsFiredByFirearm, onOpen, onEdit, onDelete }
       </div>
 
       {firearm.notes && <p className="whitespace-pre-wrap text-xs text-slate-500">{firearm.notes}</p>}
+
+      {confirmingDelete && (
+        <p className="rounded border border-red-800 bg-red-950/40 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-red-300">
+          {deleteRefsLoading
+            ? 'Checking what links to this firearm…'
+            : deleteRefs
+            ? `This will unlink ${deleteRefs.recipeCount} recipe${deleteRefs.recipeCount === 1 ? '' : 's'} and ${deleteRefs.sessionCount} range session${deleteRefs.sessionCount === 1 ? '' : 's'} (their data stays, they just won't show this firearm anymore), and this firearm's own round count history (${totalRounds} rounds) will be gone for good.`
+            : `This firearm's own round count history (${totalRounds} rounds) will be gone for good. Any linked recipes and range sessions keep their data, they just won't show this firearm anymore.`}
+        </p>
+      )}
 
       <div className="mt-auto flex items-center gap-2">
         <button

@@ -43,6 +43,26 @@ export async function fetchRoundsFiredByFirearm(userId) {
   return byFirearm;
 }
 
+/** How many recipes and range sessions currently point at this firearm
+ * profile — used to warn before deleting it, since both links use
+ * ON DELETE SET NULL (see schema_firearms.sql/schema_recipes_v2.sql):
+ * the recipes and sessions themselves are never touched, they just stop
+ * being linked to this firearm once it's gone. Archived recipes are
+ * excluded since they're already out of the active list. */
+export async function countFirearmReferences(firearmId) {
+  const [recipeResult, sessionResult] = await Promise.all([
+    supabase
+      .from('load_recipes')
+      .select('id', { count: 'exact', head: true })
+      .eq('firearm_id', firearmId)
+      .eq('is_archived', false),
+    supabase.from('range_sessions').select('id', { count: 'exact', head: true }).eq('firearm_id', firearmId),
+  ]);
+  if (recipeResult.error) throw recipeResult.error;
+  if (sessionResult.error) throw sessionResult.error;
+  return { recipeCount: recipeResult.count || 0, sessionCount: sessionResult.count || 0 };
+}
+
 /** Total rounds a firearm has seen — its own starting count (rounds it
  * had before you started tracking it here) plus everything logged
  * through the app since. */
