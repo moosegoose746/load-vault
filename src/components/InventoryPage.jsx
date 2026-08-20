@@ -80,18 +80,32 @@ function emptyNewRow() {
 }
 
 /** Parse a draft's typed values into base-unit numbers ready to save
- * (converting lbs -> grains for powder). Returns null if the required
- * fields (cost, package qty) aren't valid. */
+ * (converting lbs -> grains for powder). Returns null if the one required
+ * field — Qty On Hand, "what do you actually have" — isn't valid.
+ * Purchase Price and Qty per Package are both optional (see the Getting
+ * Started checklist discussion): plenty of reloaders track what they have
+ * before they know or bother entering what they paid for it. Cost/Grain
+ * and Cost/Round already render as "—" wherever either is missing (see
+ * formatCostPerUnit below and calculateCostPerRound in lib/recipes.js), so
+ * leaving them blank is a fully supported state, not a degraded one. */
 function parseDraft(draft, isPowder) {
-  const unitCost = Number.parseFloat(draft.unitCost);
-  const packageQtyRaw = Number.parseFloat(draft.packageQty);
-  if (!Number.isFinite(unitCost) || unitCost < 0 || !Number.isFinite(packageQtyRaw) || packageQtyRaw <= 0) {
+  const quantityOnHandRaw = draft.quantityOnHand !== '' ? Number.parseFloat(draft.quantityOnHand) : null;
+  if (quantityOnHandRaw == null || !Number.isFinite(quantityOnHandRaw) || quantityOnHandRaw < 0) {
     return null;
   }
-  const packageQty = isPowder ? Math.round(packageQtyRaw * GRAINS_PER_LB) : Math.round(packageQtyRaw);
-  const quantityOnHandRaw = draft.quantityOnHand !== '' ? Number.parseFloat(draft.quantityOnHand) : null;
-  const quantityOnHand =
-    quantityOnHandRaw != null ? Math.round((isPowder ? quantityOnHandRaw * GRAINS_PER_LB : quantityOnHandRaw) * 100) / 100 : null;
+  const quantityOnHand = Math.round((isPowder ? quantityOnHandRaw * GRAINS_PER_LB : quantityOnHandRaw) * 100) / 100;
+
+  const unitCostRaw = draft.unitCost !== '' ? Number.parseFloat(draft.unitCost) : null;
+  const unitCost = unitCostRaw != null && Number.isFinite(unitCostRaw) && unitCostRaw >= 0 ? unitCostRaw : null;
+
+  const packageQtyRaw = draft.packageQty !== '' ? Number.parseFloat(draft.packageQty) : null;
+  const packageQty =
+    packageQtyRaw != null && Number.isFinite(packageQtyRaw) && packageQtyRaw > 0
+      ? isPowder
+        ? Math.round(packageQtyRaw * GRAINS_PER_LB)
+        : Math.round(packageQtyRaw)
+      : null;
+
   return {
     unitCost,
     packageQty,
@@ -220,6 +234,7 @@ function InventoryRowCard({
             type="number"
             step="0.01"
             min="0"
+            placeholder="optional"
             value={draft.unitCost}
             onChange={(e) => updateDraft(row.id, 'unitCost', e.target.value)}
             className={inputClass}
@@ -230,6 +245,7 @@ function InventoryRowCard({
             type="number"
             step={isPowder ? '0.1' : '1'}
             min={isPowder ? '0.1' : '1'}
+            placeholder="optional"
             value={draft.packageQty}
             onChange={(e) => updateDraft(row.id, 'packageQty', e.target.value)}
             className={inputClass}
@@ -249,7 +265,6 @@ function InventoryRowCard({
             type="number"
             step="0.1"
             min="0"
-            placeholder="optional"
             value={draft.quantityOnHand}
             onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
             className={inputClass}
@@ -306,7 +321,7 @@ function InventoryRowCard({
         </p>
       )}
       {rstatus === 'invalid' && (
-        <p className="mt-2 text-[10px] text-red-400">Check purchase price / qty per package</p>
+        <p className="mt-2 text-[10px] text-red-400">Enter a valid Qty On Hand</p>
       )}
       {rstatus === 'error' && (
         <p className="mt-2 text-[10px] text-red-400">{rowError || 'Failed to save — please try again.'}</p>
@@ -399,7 +414,7 @@ function InventoryAddRowCard({
             type="number"
             step="0.01"
             min="0"
-            placeholder="0.00"
+            placeholder="optional"
             value={newRow.unitCost}
             onChange={(e) => setField('unitCost', e.target.value)}
             className={inputClass}
@@ -410,7 +425,7 @@ function InventoryAddRowCard({
             type="number"
             step={isPowder ? '0.1' : '1'}
             min={isPowder ? '0.1' : '1'}
-            placeholder="0"
+            placeholder="optional"
             value={newRow.packageQty}
             onChange={(e) => setField('packageQty', e.target.value)}
             className={inputClass}
@@ -421,7 +436,7 @@ function InventoryAddRowCard({
             type="number"
             step="0.1"
             min="0"
-            placeholder="optional"
+            placeholder="0"
             value={newRow.quantityOnHand}
             onChange={(e) => setField('quantityOnHand', e.target.value)}
             className={inputClass}
@@ -449,7 +464,7 @@ function InventoryAddRowCard({
         <Plus size={13} />
         {status === 'saving' ? '…' : `ADD ${label.toUpperCase()}`}
       </button>
-      {status === 'invalid' && <p className="mt-1 text-[10px] text-red-400">Check the fields above</p>}
+      {status === 'invalid' && <p className="mt-1 text-[10px] text-red-400">Select a component and enter a valid Qty On Hand</p>}
       {status === 'error' && (
         <p className="mt-1 text-[10px] text-red-400">{addError || 'Failed to save — please try again.'}</p>
       )}
@@ -661,10 +676,11 @@ export default function InventoryPage({ authUser }) {
       <div className="mb-4 flex flex-col gap-1">
         <h1 className="font-mono text-lg font-bold text-slate-100">MY INVENTORY & PRICING</h1>
         <p className="text-xs text-slate-400">
-          Purchase Price is what you paid for the whole package (a jug of powder, a box of
-          primers) — Cost/Grain and Cost/Unit are worked out for you. This is personal to your
-          account, separate from the shared catalog, and drives the Cost / Round shown on your
-          recipes.
+          Qty On Hand is the only required field, so you can track what you have even before you
+          know what you paid. If you do add a Purchase Price (what you paid for the whole package,
+          like a jug of powder or a box of primers), Cost/Grain and Cost/Unit are worked out for
+          you. This is personal to your account, separate from the shared catalog, and drives the
+          Cost / Round shown on your recipes.
         </p>
       </div>
 
@@ -844,6 +860,7 @@ export default function InventoryPage({ authUser }) {
                               type="number"
                               step="0.01"
                               min="0"
+                              placeholder="optional"
                               value={draft.unitCost}
                               onChange={(e) => updateDraft(row.id, 'unitCost', e.target.value)}
                               className={`${inputClass} w-24`}
@@ -854,6 +871,7 @@ export default function InventoryPage({ authUser }) {
                               type="number"
                               step={isPowder ? '0.1' : '1'}
                               min={isPowder ? '0.1' : '1'}
+                              placeholder="optional"
                               value={draft.packageQty}
                               onChange={(e) => updateDraft(row.id, 'packageQty', e.target.value)}
                               className={`${inputClass} w-24`}
@@ -873,7 +891,6 @@ export default function InventoryPage({ authUser }) {
                               type="number"
                               step="0.1"
                               min="0"
-                              placeholder="optional"
                               value={draft.quantityOnHand}
                               onChange={(e) => updateDraft(row.id, 'quantityOnHand', e.target.value)}
                               className={`${inputClass} w-24`}
@@ -949,7 +966,7 @@ export default function InventoryPage({ authUser }) {
                               </button>
                             </div>
                             {rstatus === 'invalid' && (
-                              <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Check purchase price / qty per package</p>
+                              <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Enter a valid Qty On Hand</p>
                             )}
                             {rstatus === 'error' && (
                               <p className="mt-1 max-w-[220px] whitespace-normal text-[10px] text-red-400">
@@ -1048,7 +1065,7 @@ export default function InventoryPage({ authUser }) {
                           type="number"
                           step="0.01"
                           min="0"
-                          placeholder="0.00"
+                          placeholder="optional"
                           value={newRow.unitCost}
                           onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], unitCost: e.target.value } }))}
                           className={`${inputClass} w-24`}
@@ -1059,7 +1076,7 @@ export default function InventoryPage({ authUser }) {
                           type="number"
                           step={isPowder ? '0.1' : '1'}
                           min={isPowder ? '0.1' : '1'}
-                          placeholder="0"
+                          placeholder="optional"
                           value={newRow.packageQty}
                           onChange={(e) => setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], packageQty: e.target.value } }))}
                           className={`${inputClass} w-24`}
@@ -1071,7 +1088,7 @@ export default function InventoryPage({ authUser }) {
                           type="number"
                           step="0.1"
                           min="0"
-                          placeholder="optional"
+                          placeholder="0"
                           value={newRow.quantityOnHand}
                           onChange={(e) =>
                             setNewRows((prev) => ({ ...prev, [type]: { ...prev[type], quantityOnHand: e.target.value } }))
@@ -1107,7 +1124,7 @@ export default function InventoryPage({ authUser }) {
                           {status === 'saving' ? '…' : 'ADD'}
                         </button>
                         {status === 'invalid' && (
-                          <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Check the fields above</p>
+                          <p className="mt-1 whitespace-nowrap text-[10px] text-red-400">Select a component and enter a valid Qty On Hand</p>
                         )}
                         {status === 'error' && (
                           <p className="mt-1 max-w-[220px] whitespace-normal text-[10px] text-red-400">
