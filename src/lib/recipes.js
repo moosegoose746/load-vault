@@ -320,6 +320,24 @@ export async function fetchTargetHistory(recipeId) {
   return data || [];
 }
 
+/** Every Loading Session (load_batches row) ever logged for this recipe,
+ * newest first — the full bench history, as opposed to
+ * fetchLastLoadingBatch above which only grabs the single most recent
+ * one for the Overview tab's Recent Activity summary. Powers the
+ * Loading History popup (see LoadingHistoryModal.jsx). Fetched lazily on
+ * open, same reasoning as fetchTargetHistory/fetchVelocityTrend: most
+ * Overview visits never need the full list, just the latest entry
+ * fetchRecipeDetail already pulls in. */
+export async function fetchLoadingHistory(recipeId) {
+  const { data, error } = await supabase
+    .from('load_batches')
+    .select('id, rounds_loaded, notes, created_at')
+    .eq('recipe_id', recipeId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 /** Log a Loading Session — a batch of `roundsLoaded` rounds of this
  * recipe actually assembled at the bench. This is what should trigger
  * component deduction (see computeBatchDeduction/applyBatchDeduction in

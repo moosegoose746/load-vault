@@ -6,12 +6,19 @@ import FirearmSummaryCard from './FirearmSummaryCard.jsx';
 import RecipeNotesCard from './RecipeNotesCard.jsx';
 import VelocitySparkline from './VelocitySparkline.jsx';
 import TargetHistoryModal from './TargetHistoryModal.jsx';
+import LoadingHistoryModal from './LoadingHistoryModal.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
 import ChronoImport from './ChronoImport.jsx';
 import InfoTooltip from './InfoTooltip.jsx';
 import { useSync } from '../context/SyncContext.jsx';
-import { createLoadBatch, createRangeSession, fetchVelocityTrend, fetchTargetHistory } from '../lib/recipes.js';
+import {
+  createLoadBatch,
+  createRangeSession,
+  fetchVelocityTrend,
+  fetchTargetHistory,
+  fetchLoadingHistory,
+} from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
 import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
 import { fetchUserFirearms, fetchRoundsFiredByFirearm } from '../lib/firearms.js';
@@ -102,13 +109,21 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const [targetHistory, setTargetHistory] = useState(null);
   const [targetHistoryLoading, setTargetHistoryLoading] = useState(false);
 
-  // Reset both lazy-loaded Overview extras whenever the active recipe
+  // Loading History popup — the bench-side counterpart to Target History
+  // above, fetched lazily when the Recent Activity card is clicked.
+  const [loadingHistoryOpen, setLoadingHistoryOpen] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(null);
+  const [loadingHistoryLoading, setLoadingHistoryLoading] = useState(false);
+
+  // Reset all lazy-loaded Overview extras whenever the active recipe
   // changes, so switching recipes doesn't show stale trend/history data.
   useEffect(() => {
     setVelocityMode('shots');
     setVelocityTrend(null);
     setTargetHistoryOpen(false);
     setTargetHistory(null);
+    setLoadingHistoryOpen(false);
+    setLoadingHistory(null);
   }, [activeRecipeId]);
 
   const handleVelocityModeChange = (mode) => {
@@ -136,6 +151,20 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           setTargetHistory([]);
         })
         .finally(() => setTargetHistoryLoading(false));
+    }
+  };
+
+  const openLoadingHistory = () => {
+    setLoadingHistoryOpen(true);
+    if (loadingHistory === null && isRealRecipe) {
+      setLoadingHistoryLoading(true);
+      fetchLoadingHistory(activeRecipeId)
+        .then(setLoadingHistory)
+        .catch((err) => {
+          console.error('Failed to load loading history', err);
+          setLoadingHistory([]);
+        })
+        .finally(() => setLoadingHistoryLoading(false));
     }
   };
 
@@ -315,6 +344,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
       setRoundsLoaded('');
       setBatchNotes('');
       setBatchStatus('saved');
+      setLoadingHistory(null); // clear cache so a reopened Loading History includes this new batch
       onSessionSaved?.(); // refetches the recipe, updating Rounds On Hand
       setTimeout(() => setBatchStatus('idle'), 2000);
     } catch (err) {
@@ -477,10 +507,17 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <FirearmSummaryCard firearm={linkedFirearm} roundsFiredByFirearm={roundsFiredByFirearm} />
 
-                <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
-                  <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
-                    Recent Activity
-                    <InfoTooltip>The most recent Loading Session (bench) and Range Session (shooting) logged for this recipe.</InfoTooltip>
+                <button
+                  type="button"
+                  onClick={openLoadingHistory}
+                  className="rounded border border-slate-700 bg-slate-900/60 p-4 text-left transition-colors hover:border-amber-500/60"
+                >
+                  <span className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
+                    <span className="flex items-center">
+                      Recent Activity
+                      <InfoTooltip>The most recent Loading Session (bench) and Range Session (shooting) logged for this recipe. Click to see full Loading History.</InfoTooltip>
+                    </span>
+                    <span className="normal-case text-amber-400">View history →</span>
                   </span>
                   <div className="mt-3 flex items-center justify-between text-xs">
                     <span className="text-slate-500">Last loaded</span>
@@ -498,7 +535,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
                         : '—'}
                     </span>
                   </div>
-                </div>
+                </button>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -827,6 +864,13 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         history={targetHistory}
         loading={targetHistoryLoading}
         firearmsById={firearmsById}
+      />
+
+      <LoadingHistoryModal
+        open={loadingHistoryOpen}
+        onClose={() => setLoadingHistoryOpen(false)}
+        history={loadingHistory}
+        loading={loadingHistoryLoading}
       />
     </main>
   );
