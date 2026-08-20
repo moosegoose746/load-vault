@@ -6,7 +6,8 @@ import FirearmSummaryCard from './FirearmSummaryCard.jsx';
 import RecipeNotesCard from './RecipeNotesCard.jsx';
 import VelocitySparkline from './VelocitySparkline.jsx';
 import TargetHistoryModal from './TargetHistoryModal.jsx';
-import LoadingHistoryList from './LoadingHistoryList.jsx';
+import LoadingHistoryModal from './LoadingHistoryModal.jsx';
+import FiringHistoryModal from './FiringHistoryModal.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
 import ChronoImport from './ChronoImport.jsx';
@@ -18,6 +19,7 @@ import {
   fetchVelocityTrend,
   fetchTargetHistory,
   fetchLoadingHistory,
+  fetchFiringHistory,
 } from '../lib/recipes.js';
 import { computeVelocityStats } from '../lib/stats.js';
 import { applyBatchDeduction, computeBatchDeduction, fetchUserInventoryMap } from '../lib/inventory.js';
@@ -110,9 +112,20 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
   const [targetHistoryLoading, setTargetHistoryLoading] = useState(false);
 
   // Loading History popup — the bench-side counterpart to Target History
-  // above, fetched lazily when the Recent Activity card is clicked.
+  // above, fetched lazily when the "Last loaded" row of the Recent
+  // Activity card is clicked.
+  const [loadingHistoryOpen, setLoadingHistoryOpen] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(null);
   const [loadingHistoryLoading, setLoadingHistoryLoading] = useState(false);
+
+  // Firing History popup — the range-side counterpart, fetched lazily
+  // when the "Last fired" row of the Recent Activity card is clicked.
+  // Groups this recipe's range_sessions by calendar day (a day can have
+  // more than one session logged) so it reads as "how many times this
+  // was fired on each day" rather than a flat session-by-session list.
+  const [firingHistoryOpen, setFiringHistoryOpen] = useState(false);
+  const [firingHistory, setFiringHistory] = useState(null);
+  const [firingHistoryLoading, setFiringHistoryLoading] = useState(false);
 
   // Reset all lazy-loaded Overview extras whenever the active recipe
   // changes, so switching recipes doesn't show stale trend/history data.
@@ -121,24 +134,11 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
     setVelocityTrend(null);
     setTargetHistoryOpen(false);
     setTargetHistory(null);
+    setLoadingHistoryOpen(false);
     setLoadingHistory(null);
+    setFiringHistoryOpen(false);
+    setFiringHistory(null);
   }, [activeRecipeId]);
-
-  // Loading History is shown inline under the "Log a Loading Session" box
-  // on the Loading Session tab (not a popup like Target History) — fetch
-  // it the first time that tab is actually viewed, rather than on every
-  // recipe load, since most Overview/Range visits never need it.
-  useEffect(() => {
-    if (dashboardTab !== 'loading' || loadingHistory !== null || !isRealRecipe) return;
-    setLoadingHistoryLoading(true);
-    fetchLoadingHistory(activeRecipeId)
-      .then(setLoadingHistory)
-      .catch((err) => {
-        console.error('Failed to load loading history', err);
-        setLoadingHistory([]);
-      })
-      .finally(() => setLoadingHistoryLoading(false));
-  }, [dashboardTab, loadingHistory, isRealRecipe, activeRecipeId]);
 
   const handleVelocityModeChange = (mode) => {
     setVelocityMode(mode);
@@ -165,6 +165,34 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           setTargetHistory([]);
         })
         .finally(() => setTargetHistoryLoading(false));
+    }
+  };
+
+  const openLoadingHistory = () => {
+    setLoadingHistoryOpen(true);
+    if (loadingHistory === null && isRealRecipe) {
+      setLoadingHistoryLoading(true);
+      fetchLoadingHistory(activeRecipeId)
+        .then(setLoadingHistory)
+        .catch((err) => {
+          console.error('Failed to load loading history', err);
+          setLoadingHistory([]);
+        })
+        .finally(() => setLoadingHistoryLoading(false));
+    }
+  };
+
+  const openFiringHistory = () => {
+    setFiringHistoryOpen(true);
+    if (firingHistory === null && isRealRecipe) {
+      setFiringHistoryLoading(true);
+      fetchFiringHistory(activeRecipeId)
+        .then(setFiringHistory)
+        .catch((err) => {
+          console.error('Failed to load firing history', err);
+          setFiringHistory([]);
+        })
+        .finally(() => setFiringHistoryLoading(false));
     }
   };
 
@@ -417,6 +445,22 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           setVelocityTrend(null);
         }
 
+        // Same invalidate-or-refresh treatment for Firing History — a
+        // new Range Session just landed, so any cached day-grouping is
+        // stale.
+        if (firingHistoryOpen) {
+          setFiringHistoryLoading(true);
+          fetchFiringHistory(activeRecipeId)
+            .then(setFiringHistory)
+            .catch((err) => {
+              console.error('Failed to refresh firing history', err);
+              setFiringHistory([]);
+            })
+            .finally(() => setFiringHistoryLoading(false));
+        } else {
+          setFiringHistory(null);
+        }
+
         setTimeout(() => setSaveState('idle'), 2000);
       } catch (err) {
         console.error('Failed to save range session', err);
@@ -510,24 +554,32 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
                 <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
                   <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
                     Recent Activity
-                    <InfoTooltip>The most recent Loading Session (bench) and Range Session (shooting) logged for this recipe. Full Loading History is on the Loading Session tab.</InfoTooltip>
+                    <InfoTooltip>The most recent Loading Session (bench) and Range Session (shooting) logged for this recipe. Click either row for its full history.</InfoTooltip>
                   </span>
-                  <div className="mt-3 flex items-center justify-between text-xs">
+                  <button
+                    type="button"
+                    onClick={openLoadingHistory}
+                    className="mt-3 flex w-full items-center justify-between text-xs hover:text-amber-400"
+                  >
                     <span className="text-slate-500">Last loaded</span>
                     <span className="font-mono text-slate-200">
                       {recipe.lastLoadedAt
                         ? `${recipe.lastLoadedRounds ?? '?'} rds — ${new Date(recipe.lastLoadedAt).toLocaleDateString()}`
                         : '—'}
                     </span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between border-t border-slate-800 pt-2 text-xs">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openFiringHistory}
+                    className="mt-2 flex w-full items-center justify-between border-t border-slate-800 pt-2 text-xs hover:text-amber-400"
+                  >
                     <span className="text-slate-500">Last fired</span>
                     <span className="font-mono text-slate-200">
                       {recipe.lastFiredAt
                         ? `${recipe.lastFiredRounds ?? '?'} rds — ${new Date(recipe.lastFiredAt).toLocaleDateString()}`
                         : '—'}
                     </span>
-                  </div>
+                  </button>
                 </div>
               </div>
 
@@ -742,12 +794,6 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         </div>
       )}
 
-      {isRealRecipe && (
-        <div className={dashboardTab === 'loading' ? 'mt-4 rounded border border-slate-800 bg-panel p-4' : 'hidden'}>
-          <LoadingHistoryList history={loadingHistory} loading={loadingHistoryLoading} />
-        </div>
-      )}
-
       <div className={dashboardTab === 'range' ? 'flex flex-col gap-4' : 'hidden'}>
           <div className="rounded border border-slate-800 bg-panel p-4">
             <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-amber-400">
@@ -863,6 +909,20 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         history={targetHistory}
         loading={targetHistoryLoading}
         firearmsById={firearmsById}
+      />
+
+      <LoadingHistoryModal
+        open={loadingHistoryOpen}
+        onClose={() => setLoadingHistoryOpen(false)}
+        history={loadingHistory}
+        loading={loadingHistoryLoading}
+      />
+
+      <FiringHistoryModal
+        open={firingHistoryOpen}
+        onClose={() => setFiringHistoryOpen(false)}
+        history={firingHistory}
+        loading={firingHistoryLoading}
       />
     </main>
   );

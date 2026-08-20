@@ -323,11 +323,12 @@ export async function fetchTargetHistory(recipeId) {
 /** Every Loading Session (load_batches row) ever logged for this recipe,
  * newest first — the full bench history, as opposed to
  * fetchLastLoadingBatch above which only grabs the single most recent
- * one for the Overview tab's Recent Activity summary. Powers the inline
- * Loading History list on the Loading Session tab (see
- * LoadingHistoryList.jsx), fetched lazily the first time that tab is
- * viewed rather than on every recipe load, since most Overview/Range
- * visits never need it. */
+ * one for the Overview tab's Recent Activity summary. Powers the
+ * Loading History popup (see LoadingHistoryModal.jsx), opened by
+ * clicking the "Last loaded" row of Recent Activity. Fetched lazily on
+ * open, same reasoning as fetchTargetHistory/fetchVelocityTrend: most
+ * Overview visits never need the full list, just the latest entry
+ * fetchRecipeDetail already pulls in. */
 export async function fetchLoadingHistory(recipeId) {
   const { data, error } = await supabase
     .from('load_batches')
@@ -336,6 +337,41 @@ export async function fetchLoadingHistory(recipeId) {
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
+}
+
+/** Every Range Session for this recipe that logged a rounds_fired count,
+ * grouped by calendar day (newest day first) — the range-side
+ * counterpart to fetchLoadingHistory above. Grouped rather than a flat
+ * per-session list because "how many times was this fired on a given
+ * day" is naturally a day-level question, and a single day can have more
+ * than one Range Session logged. Sessions with no rounds_fired recorded
+ * are skipped (nothing to count), same treatment fetchVelocityTrend
+ * gives sessions missing chrono data. Powers the Firing History popup
+ * (see FiringHistoryModal.jsx), opened by clicking the "Last fired" row
+ * of Recent Activity. Grouping is done here in JS rather than a
+ * Postgres-side GROUP BY since `created_at` is a full timestamp and the
+ * "day" boundary should follow the user's local calendar day, not UTC. */
+export async function fetchFiringHistory(recipeId) {
+  const { data, error } = await supabase
+    .from('range_sessions')
+    .select('rounds_fired, created_at')
+    .eq('recipe_id', recipeId)
+    .not('rounds_fired', 'is', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const byDay = new Map();
+  (data || []).forEach((s) => {
+    // Local calendar day the session was logged on, as a stable sort/
+    // group key — toLocaleDateString() alone isn't safely sortable
+    // across locales, so key on the ISO date portion instead.
+    const dayKey = new Date(s.created_at).toISOString().slice(0, 10);
+    const existing = byDay.get(dayKey) || { date: dayKey, roundsFired: 0, sessionCount: 0 };
+    existing.roundsFired += s.rounds_fired || 0;
+    existing.sessionCount += 1;
+    byDay.set(dayKey, existing);
+  });
+  return Array.from(byDay.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
 /** Log a Loading Session — a batch of `roundsLoaded` rounds of this
