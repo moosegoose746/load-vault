@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Beaker, Boxes, ChevronRight, Crosshair, Info, Save, Share2, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Beaker, Boxes, ChevronRight, Crosshair, Info, NotebookPen, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
@@ -49,7 +49,11 @@ const TABS = [
     key: 'loading',
     label: 'LOADING SESSION',
     icon: Boxes,
-    realOnly: true,
+    // Shown for the demo recipe too (unlike a real recipe-only tab) so the
+    // demo's tab bar matches a real recipe's shape — its content just
+    // explains it doesn't actually work there, see the isRealRecipe check
+    // inside the tab body below.
+    realOnly: false,
     info: 'Assembling ammo at the bench — logging one here is what actually consumes powder/bullets/primers/brass from your Inventory. Do this whenever you sit down and load a batch, whether or not you shoot it right away.',
   },
   {
@@ -708,15 +712,91 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
               />
             </>
           ) : (
-            <div className="rounded border border-slate-700 bg-slate-900/60 p-4 text-xs text-slate-400">
-              Firearm: {recipe.firearmLabel ?? recipe.rifleModel ?? '—'}
-            </div>
+            // Demo recipe: the same card layout a real recipe shows below,
+            // just genuinely empty rather than the old single "Firearm: X"
+            // text line — so the demo's shape matches a real recipe at a
+            // glance. Deliberately static (no buttons/click handlers) since
+            // there's no real history/target/notes behind any of it to open
+            // — same "shown but inert" treatment as the Loading Session tab
+            // above, rather than wiring up handlers that would try to fetch
+            // history for a recipe that was never actually saved.
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <FirearmSummaryCard firearm={null} roundsFiredByFirearm={{}} />
+
+                <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                  <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                    Recent Activity
+                    <InfoTooltip>The most recent Loading Session (bench) and Range Session (shooting) logged for this recipe. Click either row for its full history.</InfoTooltip>
+                  </span>
+                  <div className="mt-3 flex items-center justify-between text-xs">
+                    <span className="text-slate-600">Last loaded</span>
+                    <span className="font-mono text-slate-600">—</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between border-t border-slate-800 pt-2 text-xs">
+                    <span className="text-slate-600">Last fired</span>
+                    <span className="font-mono text-slate-600">—</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                  <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                    Last Target
+                    <InfoTooltip>The most recent saved target photo for this recipe, from Range Day. Click to see the full target history.</InfoTooltip>
+                  </span>
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded border border-slate-800 bg-slate-950">
+                      <Crosshair size={18} className="text-slate-700" />
+                    </div>
+                    <span className="font-mono text-2xl font-semibold text-slate-600">—</span>
+                  </div>
+                </div>
+
+                <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                  <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                    Velocity Trend
+                    <InfoTooltip>
+                      "Session" is per-shot velocity from the most recent chrono log, in shot order — the dashed
+                      line is the session average, and red dots are flyers (outside ±2 SD). "History" is average
+                      velocity per Range Session over this recipe's life, showing real drift from barrel wear or
+                      a powder lot change. Tap any point on either chart for its exact value.
+                    </InfoTooltip>
+                  </span>
+                  <p className="mt-2 py-3 text-center text-[11px] text-slate-600">
+                    No chrono data logged for this recipe yet.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded border border-slate-700 bg-slate-900/60 p-4">
+                <span className="flex items-center text-xs uppercase tracking-wide text-slate-500">
+                  <NotebookPen size={13} className="mr-1.5 text-amber-400" />
+                  Notes
+                  <InfoTooltip>Free-form notes for this recipe — load process quirks, range-day observations, anything worth remembering next time.</InfoTooltip>
+                </span>
+                <p className="mt-2 text-xs text-slate-600">No notes yet.</p>
+              </div>
+            </>
           )}
 
         </div>
 
-      {isRealRecipe && (
-        <div className={dashboardTab === 'loading' ? 'rounded border border-slate-800 bg-panel p-4' : 'hidden'}>
+      <div className={dashboardTab === 'loading' ? 'rounded border border-slate-800 bg-panel p-4' : 'hidden'}>
+        {!isRealRecipe && (
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <Boxes size={22} className="text-slate-700" />
+            <h2 className="font-mono text-xs uppercase tracking-widest text-slate-500">Log a Loading Session</h2>
+            <p className="max-w-sm font-mono text-xs text-slate-600">
+              This tab is shown here so the demo recipe matches a real one, but Loading Session
+              tracking only works for your own saved recipes — logging a batch actually consumes
+              real inventory stock. Create a recipe from the Sidebar to try it for real.
+            </p>
+          </div>
+        )}
+        {isRealRecipe && (
+          <>
           <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
             <Boxes size={14} />
             Log a Loading Session
@@ -817,8 +897,9 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           {batchStatus === 'error' && (
             <p className="mt-2 font-mono text-[11px] text-red-400">Enter a valid Rounds Loaded amount.</p>
           )}
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       <div className={dashboardTab === 'range' ? 'flex flex-col gap-4' : 'hidden'}>
           <div className="rounded border border-slate-800 bg-panel p-4">
