@@ -106,6 +106,14 @@ export default function SafetyBasicsModal({ open, onClose }) {
           verify you're using the load recipe you think you are — a mixed-up recipe is one of the
           easiest ways to end up with the wrong charge in a case.
         </Section>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-1 shrink-0 rounded border border-amber-500 bg-amber-500/10 px-4 py-2 font-mono text-xs font-bold uppercase tracking-wide text-amber-300 hover:bg-amber-500/20"
+        >
+          Got it
+        </button>
       </div>
     </div>
   );

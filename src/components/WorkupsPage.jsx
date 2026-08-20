@@ -895,7 +895,7 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
               <button
                 type="button"
                 onClick={() => setSafetyOpen(true)}
-                className="mt-2 flex items-center gap-1.5 self-center font-mono text-[10px] uppercase tracking-wide text-slate-500 hover:text-amber-400"
+                className="mt-2 flex items-center gap-1.5 self-center font-mono text-[10px] uppercase tracking-wide text-amber-500 hover:text-amber-300"
               >
                 <ShieldAlert size={11} />
                 Reloading safety basics
