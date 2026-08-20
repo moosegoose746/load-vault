@@ -23,6 +23,7 @@ import RecipeNotesCard from './RecipeNotesCard.jsx';
 import VelocitySparkline from './VelocitySparkline.jsx';
 import TargetHistoryModal from './TargetHistoryModal.jsx';
 import LoadingHistoryModal from './LoadingHistoryModal.jsx';
+import LoadingHistoryList from './LoadingHistoryList.jsx';
 import FiringHistoryModal from './FiringHistoryModal.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
@@ -211,6 +212,23 @@ export default function Dashboard({
     }
   };
 
+  // The Loading Session tab now shows this same history inline (see the
+  // "what belongs on this tab" discussion in the progress log), so it
+  // needs to load without requiring a click on the Overview modal trigger
+  // first — fetch it the first time either surface asks for it.
+  useEffect(() => {
+    if (dashboardTab === 'loading' && loadingHistory === null && isRealRecipe) {
+      setLoadingHistoryLoading(true);
+      fetchLoadingHistory(activeRecipeId)
+        .then(setLoadingHistory)
+        .catch((err) => {
+          console.error('Failed to load loading history', err);
+          setLoadingHistory([]);
+        })
+        .finally(() => setLoadingHistoryLoading(false));
+    }
+  }, [dashboardTab, loadingHistory, isRealRecipe, activeRecipeId]);
+
   const openLoadingHistory = () => {
     setLoadingHistoryOpen(true);
     if (loadingHistory === null && isRealRecipe) {
@@ -398,6 +416,20 @@ export default function Dashboard({
     () => computeBatchDeduction(recipeComponents, inventoryMap, roundsLoaded),
     [recipeComponents, inventoryMap, roundsLoaded]
   );
+
+  // Warn-but-allow, not a hard block (see the Loading Session tab
+  // discussion in the progress log) — inventory quantities can be stale,
+  // or someone might be about to place a components order, so typing in
+  // more than Loadable From Stock shouldn't stop the log from saving.
+  // This is a quick heads-up against the single bottleneck number;
+  // batchDeductionPreview below still does the detailed per-component
+  // breakdown once a batch is actually being logged.
+  const roundsLoadedNum = Number(roundsLoaded);
+  const exceedsLoadableStock =
+    isRealRecipe &&
+    recipe.loadableFromStock != null &&
+    Number.isFinite(roundsLoadedNum) &&
+    roundsLoadedNum > recipe.loadableFromStock;
 
   // A non-blocking heads-up, not an error — firing more than what's
   // logged as loaded usually just means a loading session from before
@@ -951,6 +983,30 @@ export default function Dashboard({
             </span>{' '}
             loaded and ready to shoot.
           </p>
+
+          {/* Answers "can I actually load today" before you've typed
+              anything — same bottleneck number as the Loadable From Stock
+              card on Overview, just surfaced here where it's actually
+              decision-relevant. Independent of whatever's in the Rounds
+              Loaded box below; that field gets its own live warning
+              instead of sharing this readout, so the standing answer to
+              "how many can I load" doesn't change shape while you type. */}
+          <div className="mb-3 flex items-center justify-between rounded border border-slate-800 bg-slate-900/40 px-3 py-2">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-slate-500">
+              Loadable From Stock
+            </span>
+            <span className="font-mono text-sm text-slate-100">
+              {recipe.loadableFromStock != null ? (
+                <>
+                  {recipe.loadableFromStock} rounds
+                  <span className="ml-1.5 text-[11px] text-slate-500">({recipe.loadableBottleneck})</span>
+                </>
+              ) : (
+                <span className="text-slate-600">Track component stock in Inventory to see this</span>
+              )}
+            </span>
+          </div>
+
           <div className="flex flex-wrap items-end gap-4">
             <label className="flex flex-col gap-1">
               <span className="font-mono text-[10px] uppercase text-slate-500">Rounds Loaded</span>
@@ -960,7 +1016,11 @@ export default function Dashboard({
                 min="1"
                 value={roundsLoaded}
                 onChange={(e) => setRoundsLoaded(e.target.value)}
-                className="w-28 rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                className={`w-28 rounded border bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:outline-none ${
+                  exceedsLoadableStock
+                    ? 'border-amber-500 focus:border-amber-500'
+                    : 'border-slate-700 focus:border-amber-500'
+                }`}
               />
             </label>
             <label className="flex flex-1 flex-col gap-1">
@@ -984,6 +1044,13 @@ export default function Dashboard({
           {!authUser && (
             <p className="mt-2 font-mono text-[11px] text-amber-400">
               Sign in with a real account to log a loading session.
+            </p>
+          )}
+
+          {exceedsLoadableStock && (
+            <p className="mt-2 font-mono text-[11px] text-amber-400">
+              Only {recipe.loadableFromStock} rounds' worth of {recipe.loadableBottleneck} on hand — logging
+              this batch anyway is fine (stock counts can drift), just double-check before you sit down.
             </p>
           )}
 
@@ -1038,6 +1105,19 @@ export default function Dashboard({
           {batchStatus === 'error' && (
             <p className="mt-2 font-mono text-[11px] text-red-400">Enter a valid Rounds Loaded amount.</p>
           )}
+
+          {/* Requested addition to this tab (see progress log) — previous
+              sessions, right here, instead of only reachable through the
+              Overview tab's Recent Activity → Loading History modal. Same
+              list markup as that modal (LoadingHistoryList.jsx), fetched
+              as soon as this tab is opened rather than waiting on a click. */}
+          <div className="mt-5 border-t border-slate-800 pt-4">
+            <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
+              <Boxes size={14} />
+              Loading History
+            </h2>
+            <LoadingHistoryList history={loadingHistory} loading={loadingHistoryLoading} />
+          </div>
           </>
         )}
       </div>
