@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Scale, Trophy, X } from 'lucide-react';
+import { AlertTriangle, Scale, Trophy, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
 import { fetchUserRecipes, fetchRecipeDetail } from '../lib/recipes.js';
 
@@ -48,14 +48,28 @@ const ROWS = [
     label: 'Avg Velocity',
     get: (r) => r.avgVelocity,
     format: (v) => (v != null ? `${numberFmt(v)} fps` : '—'),
+    caliberSensitive: true,
   },
-  { label: 'SD', get: (r) => r.stdDevFps, format: (v) => (v != null ? numberFmt(v, 1) : '—'), better: 'lower' },
-  { label: 'ES', get: (r) => r.extremeSpread, format: (v) => (v != null ? numberFmt(v, 1) : '—'), better: 'lower' },
+  {
+    label: 'SD',
+    get: (r) => r.stdDevFps,
+    format: (v) => (v != null ? numberFmt(v, 1) : '—'),
+    better: 'lower',
+    caliberSensitive: true,
+  },
+  {
+    label: 'ES',
+    get: (r) => r.extremeSpread,
+    format: (v) => (v != null ? numberFmt(v, 1) : '—'),
+    better: 'lower',
+    caliberSensitive: true,
+  },
   {
     label: 'Group Size',
     get: (r) => r.groupSizeMoa,
     format: (v) => (v != null ? `${numberFmt(v, 2)} MOA` : '—'),
     better: 'lower',
+    caliberSensitive: true,
   },
   { label: 'Distance', get: (r) => r.distanceYards, format: (v) => (v != null ? `${v} yd` : '—') },
   {
@@ -83,15 +97,21 @@ const ROWS = [
  * with no value for this row, are excluded from both checks rather than
  * counted as a default 0/empty that could falsely win or falsely break
  * the "all same" check. */
-function computeRowState(row, recipes, details) {
+function computeRowState(row, recipes, details, caliberMismatch) {
   const loaded = recipes.filter((r) => details[r.id]);
   if (loaded.length < 2) return { allSame: false, winnerIds: new Set() };
 
   const displayValues = loaded.map((r) => row.format(row.get(details[r.id])));
   const allSame = displayValues.every((v) => v === displayValues[0]);
 
+  // Don't crown a "winner" on a row whose values aren't apples-to-apples
+  // in the first place — a lower SD on a 9mm load next to a .270 load
+  // isn't actually the "better" one, the calibers just behave
+  // differently. The row still shows its raw values and the mismatch
+  // warning icon (see caliberSensitive above); it just doesn't award a
+  // trophy that would imply a real head-to-head win.
   const winnerIds = new Set();
-  if (!allSame && row.better) {
+  if (!allSame && row.better && !(row.caliberSensitive && caliberMismatch)) {
     const numeric = loaded
       .map((r) => ({ id: r.id, value: row.get(details[r.id]) }))
       .filter((entry) => entry.value != null && !Number.isNaN(Number(entry.value)));
@@ -158,15 +178,42 @@ export default function ComparePage({ authUser }) {
     [selectedIds, recipeList]
   );
 
+  // Caliber/distance mismatch detection — velocity, SD, ES, and group
+  // size are only directly comparable within the same caliber (different
+  // bullet weights and powder charges behave completely differently), and
+  // group size specifically loses some of its apples-to-apples value when
+  // recorded at different distances too. Computed off the loaded details'
+  // raw caliberId (not the display string) so it can't be fooled by two
+  // differently-worded labels for the same caliber; distance uses the
+  // plain yardage value. Only recipes whose detail has actually loaded
+  // are considered, same as the row-level diff/winner logic below.
+  const mismatchInfo = useMemo(() => {
+    const loaded = selectedRecipes.filter((r) => details[r.id]);
+    if (loaded.length < 2) return { caliberMismatch: false, distanceMismatch: false, caliberGroups: [] };
+    const caliberIds = new Set(loaded.map((r) => details[r.id].caliberId ?? details[r.id].caliber));
+    const distances = new Set(loaded.map((r) => details[r.id].distanceYards ?? null));
+    const groupsByLabel = {};
+    loaded.forEach((r) => {
+      const label = details[r.id].caliber || '—';
+      groupsByLabel[label] = groupsByLabel[label] || [];
+      groupsByLabel[label].push(r.title);
+    });
+    return {
+      caliberMismatch: caliberIds.size > 1,
+      distanceMismatch: distances.size > 1,
+      caliberGroups: Object.entries(groupsByLabel),
+    };
+  }, [selectedRecipes, details]);
+
   // Row diff/winner state, recomputed whenever the selection or the
   // fetched details change — see computeRowState above.
   const rowStates = useMemo(() => {
     const map = {};
     ROWS.forEach((row) => {
-      map[row.label] = computeRowState(row, selectedRecipes, details);
+      map[row.label] = computeRowState(row, selectedRecipes, details, mismatchInfo.caliberMismatch);
     });
     return map;
-  }, [selectedRecipes, details]);
+  }, [selectedRecipes, details, mismatchInfo.caliberMismatch]);
 
   const anyWinnerBadges = Object.values(rowStates).some((s) => s.winnerIds.size > 0);
 
@@ -228,6 +275,34 @@ export default function ComparePage({ authUser }) {
         <p className="font-mono text-xs text-slate-500">Pick at least one more recipe to compare.</p>
       ) : (
         <div className="flex flex-col gap-2">
+          {mismatchInfo.caliberMismatch && (
+            <div className="flex items-start gap-2 rounded border border-amber-600 bg-amber-500/10 p-3 font-mono text-xs leading-relaxed text-amber-200">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+              <span>
+                These recipes are different calibers (
+                {mismatchInfo.caliberGroups.map(([caliber, titles], i) => (
+                  <span key={caliber}>
+                    {i > 0 && ', '}
+                    <span className="font-semibold">{caliber}</span>: {titles.join(', ')}
+                  </span>
+                ))}
+                ) — Avg Velocity, SD, ES, and Group Size (marked below) aren't directly comparable
+                across different calibers; bullet weight and charge weight behave too differently
+                for those numbers to mean the same thing. Specs and cost/round are still fine to
+                compare.
+              </span>
+            </div>
+          )}
+          {!mismatchInfo.caliberMismatch && mismatchInfo.distanceMismatch && (
+            <div className="flex items-start gap-2 rounded border border-slate-700 bg-slate-900/60 p-3 font-mono text-xs leading-relaxed text-slate-400">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-slate-500" />
+              <span>
+                These recipes were tested at different distances — Group Size is in MOA (already
+                angle-normalized, so it's still comparable), but keep in mind different range days
+                and distances can mean different conditions behind the numbers.
+              </span>
+            </div>
+          )}
           {anyWinnerBadges && (
             <p className="flex items-center gap-1.5 font-mono text-[11px] text-slate-500">
               <Trophy size={12} className="text-emerald-400" />
@@ -262,7 +337,16 @@ export default function ComparePage({ authUser }) {
                           allSame ? 'bg-slate-900 text-slate-500' : 'bg-slate-900 font-semibold text-slate-300'
                         }`}
                       >
-                        {row.label}
+                        <span className="inline-flex items-center gap-1">
+                          {row.label}
+                          {row.caliberSensitive && mismatchInfo.caliberMismatch && (
+                            <AlertTriangle
+                              size={11}
+                              className="shrink-0 text-amber-400"
+                              aria-label="Not directly comparable across calibers"
+                            />
+                          )}
+                        </span>
                       </td>
                       {selectedRecipes.map((r) => {
                         const detail = details[r.id];
