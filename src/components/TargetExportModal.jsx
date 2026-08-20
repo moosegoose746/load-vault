@@ -9,11 +9,24 @@ const EXPORT_SIZE = 1080;
 // and a watermark footer reading "Verified with Precision Load Vault •
 // [Recipe QR Code]" — every share is a small ad for the app.
 //
-// TODO: this currently points the QR code at the app homepage, not the
-// specific recipe. Once a real public recipe page exists (routing +
-// visibility-aware view, see load_recipes.visibility in the schema),
-// switch SHARE_URL below to that recipe's own share URL instead.
-const SHARE_URL = 'https://load-vault.vercel.app';
+// Fallback for the demo recipe / a private recipe: the QR code links to
+// the app homepage rather than a specific recipe. A real, saved recipe
+// set to Unlisted or Public gets its own link instead (see
+// buildShareUrl below) — that's the actual public recipe page at
+// `/r/:id` (PublicRecipePage.jsx), which didn't exist when this TODO was
+// first written. A private recipe still falls back to the homepage
+// on purpose: a stranger scanning the QR code on a shared photo has no
+// account/session, so linking them to a private recipe's URL would just
+// show them PublicRecipePage's "not found" state (RLS blocks it) — the
+// homepage is a more useful landing spot than a dead end.
+const HOMEPAGE_URL = window.location.origin;
+
+function buildShareUrl(recipe) {
+  if (recipe?.id && (recipe.visibility === 'public' || recipe.visibility === 'unlisted')) {
+    return `${window.location.origin}/r/${recipe.id}`;
+  }
+  return HOMEPAGE_URL;
+}
 
 /** Shorten `text` with an ellipsis so it fits within `maxWidth` px at the
  * canvas context's current font — canvas text doesn't wrap or truncate on
@@ -64,12 +77,19 @@ export default function TargetExportModal({
   const [qrReady, setQrReady] = useState(false);
   const [pngUrl, setPngUrl] = useState(null);
 
-  // Generate the QR code once on mount and cache it as an Image — it
-  // always points at the same URL for now (see SHARE_URL above), so there's
-  // no need to regenerate it every time the target/shots/recipe change.
+  // Which URL this export's QR code/footer text actually point at — a
+  // real Unlisted/Public recipe's own share link, or the homepage
+  // fallback. See buildShareUrl above.
+  const shareUrl = buildShareUrl(recipe);
+
+  // Regenerate the QR code whenever which recipe (and its visibility) is
+  // being exported changes, since shareUrl above can now differ per
+  // recipe — this used to run once on mount, back when SHARE_URL was a
+  // hardcoded constant with nothing to react to.
   useEffect(() => {
     let cancelled = false;
-    QRCode.toDataURL(SHARE_URL, {
+    setQrReady(false);
+    QRCode.toDataURL(shareUrl, {
       margin: 1,
       width: 200,
       color: { dark: '#121619ff', light: '#fbbf24ff' },
@@ -87,7 +107,7 @@ export default function TargetExportModal({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [shareUrl]);
 
   useEffect(() => {
     if (!open || !canvasRef.current) return;
@@ -189,7 +209,12 @@ export default function TargetExportModal({
     ctx.fillText('PRECISION LOAD VAULT', 24, footerTop + 58);
     ctx.font = '14px monospace';
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText(SHARE_URL.replace('https://', ''), 24, footerTop + 80);
+    // The printed text stays the short brand domain even when the QR code
+    // itself points at a specific recipe's own long /r/:id URL — a
+    // full UUID-bearing link printed in tiny footer text would be both
+    // illegible and ugly; the QR code is what actually carries the
+    // specific-recipe link for anyone who scans it.
+    ctx.fillText(HOMEPAGE_URL.replace(/^https?:\/\//, ''), 24, footerTop + 80);
 
     const qrSize = FOOTER_HEIGHT - 40;
     const qrX = EXPORT_SIZE - qrSize - 32;

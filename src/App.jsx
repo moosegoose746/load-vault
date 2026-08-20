@@ -11,6 +11,7 @@ import FirearmsPage from './components/FirearmsPage.jsx';
 import WorkupsPage from './components/WorkupsPage.jsx';
 import ComparePage from './components/ComparePage.jsx';
 import ArchivedRecipesModal from './components/ArchivedRecipesModal.jsx';
+import PublicRecipePage from './components/PublicRecipePage.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import {
   archiveRecipe,
@@ -372,7 +373,27 @@ function AppShell() {
   );
 }
 
+// Minimal manual path routing for the ONE route that needs to exist
+// outside the normal auth-gated app shell: a public recipe share link
+// (see PublicRecipePage.jsx). Deliberately not React Router or any
+// routing library — the rest of this app already gets by on a plain
+// `view` useState string in AppShell instead of real URLs, and adding a
+// whole router dependency for exactly one externally-linkable page would
+// be a lot of new surface area for not much gain. `/r/<uuid>` is matched
+// directly against window.location.pathname; anything else falls through
+// to the normal app. Checked once at module-level render time, not
+// reactively — a public recipe link is always a fresh page load (from a
+// QR scan or a pasted URL), never a client-side navigation from within
+// the app itself, so there's no in-app link that would need this to
+// update without a full reload.
+const PUBLIC_RECIPE_PATH = /^\/r\/([^/]+)\/?$/;
+
 export default function App() {
+  const publicRecipeMatch = window.location.pathname.match(PUBLIC_RECIPE_PATH);
+  if (publicRecipeMatch) {
+    return <PublicRecipePage recipeId={publicRecipeMatch[1]} />;
+  }
+
   return (
     <RangeModeProvider>
       <SyncProvider>

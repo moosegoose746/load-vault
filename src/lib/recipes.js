@@ -479,6 +479,15 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     lastLoadedRounds: lastBatch?.rounds_loaded ?? null,
     lastFiredAt: session?.created_at ?? null,
     lastFiredRounds: session?.rounds_fired ?? null,
+    // 'private' | 'unlisted' | 'public' — see schema.sql's original
+    // load_recipes.visibility column and schema_public_recipes.sql for the
+    // RLS policies that make 'public'/'unlisted' actually readable by an
+    // anonymous visitor. Defaults to 'private' at the DB level, so this
+    // should never actually be null/undefined for a real saved row, but
+    // the mock demo recipe doesn't set it — fall back to 'private' so
+    // nothing downstream (RecipeForm, the share-link logic in
+    // TargetExportModal) has to null-check it separately.
+    visibility: row.visibility || 'private',
   };
 }
 
@@ -499,7 +508,7 @@ export async function fetchRecipeDetail(recipeId, userId) {
     .from('load_recipes')
     .select(
       `
-      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, firearm_id, notes, factory_price_per_round,
+      id, title, caliber_id, charge_weight_grains, coal_inches, rifle_model, firearm_id, notes, factory_price_per_round, visibility,
       calibers ( name ),
       firearm:firearms ( id, name ),
       powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
@@ -540,6 +549,77 @@ export async function fetchRecipeDetail(recipeId, userId) {
   ]);
 
   return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch);
+}
+
+/** The anonymous-safe counterpart to fetchRecipeDetail, powering the
+ * Public Recipe Page (see PublicRecipePage.jsx / the `/r/:id` route in
+ * App.jsx). Deliberately does NOT reuse fetchRecipeDetail — it never
+ * passes a userId (there may not be a signed-in session at all, and even
+ * if there is one, Cost/Round and Money Saved are the VIEWER's private
+ * inventory pricing question, not something to compute or show on a
+ * stranger's shared recipe), and it never touches
+ * load_batches/user_inventory (owner-only tables with no public RLS
+ * policy — see schema_public_recipes.sql, which only opens up
+ * range_sessions/shot_logs, not those).
+ *
+ * Relies entirely on RLS to enforce "only public/unlisted, non-archived
+ * recipes are visible" — the explicit .eq('is_archived', false) below is
+ * a defensive belt-and-suspenders check, not what's actually doing the
+ * access control. A private recipe, or one that doesn't exist, comes back
+ * as .single() erroring (0 rows) exactly like it would for a genuinely
+ * missing id — callers can't distinguish "private" from "doesn't exist,"
+ * which is the correct, boring answer for a share link (no need to leak
+ * "there's something here, it's just private" to a stranger). */
+export async function fetchPublicRecipeDetail(recipeId) {
+  const { data: row, error } = await supabase
+    .from('load_recipes')
+    .select(
+      `
+      id, title, caliber_id, charge_weight_grains, coal_inches, notes, visibility, created_at,
+      calibers ( name ),
+      powder:components!load_recipes_powder_id_fkey ( brand, model ),
+      bullet:components!load_recipes_bullet_id_fkey ( brand, model ),
+      primer:components!load_recipes_primer_id_fkey ( brand, model ),
+      brass:components!load_recipes_brass_id_fkey ( brand, model ),
+      author:profiles ( username )
+    `
+    )
+    .eq('id', recipeId)
+    .eq('is_archived', false)
+    .single();
+  if (error) throw error;
+
+  const { data: sessions, error: sessionError } = await supabase
+    .from('range_sessions')
+    .select('distance_yards, group_size_moa, avg_velocity_fps, std_dev_fps, extreme_spread_fps, target_image_url, created_at')
+    .eq('recipe_id', recipeId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (sessionError) throw sessionError;
+  const latestSession = sessions?.[0] ?? null;
+
+  const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : null);
+  return {
+    id: row.id,
+    title: row.title,
+    caliber: row.calibers?.name ?? '—',
+    powder: componentLabel(row.powder),
+    bullet: componentLabel(row.bullet),
+    chargeGrains: row.charge_weight_grains,
+    coalInches: row.coal_inches,
+    primer: componentLabel(row.primer),
+    brass: componentLabel(row.brass),
+    notes: row.notes || '',
+    visibility: row.visibility,
+    createdAt: row.created_at,
+    authorUsername: row.author?.username || 'a Precision Load Vault user',
+    distanceYards: latestSession?.distance_yards ?? null,
+    groupSizeMoa: latestSession?.group_size_moa ?? null,
+    avgVelocity: latestSession?.avg_velocity_fps ?? null,
+    stdDevFps: latestSession?.std_dev_fps ?? null,
+    extremeSpread: latestSession?.extreme_spread_fps ?? null,
+    targetImageUrl: latestSession?.target_image_url ?? null,
+  };
 }
 
 /** Soft-delete a recipe (sets is_archived = true rather than a hard DELETE,
@@ -585,6 +665,7 @@ export async function createRecipe(fields, userId) {
       firearm_id: fields.firearmId || null,
       notes: fields.notes || null,
       factory_price_per_round: fields.factoryPricePerRound || null,
+      visibility: fields.visibility || 'private',
     })
     .select()
     .single();
@@ -618,6 +699,7 @@ export async function updateRecipe(recipeId, fields) {
       firearm_id: fields.firearmId || null,
       notes: fields.notes || null,
       factory_price_per_round: fields.factoryPricePerRound || null,
+      visibility: fields.visibility || 'private',
     })
     .eq('id', recipeId)
     .select()

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, X } from 'lucide-react';
+import InfoTooltip from './InfoTooltip.jsx';
 import {
   createRecipe,
   updateRecipe,
@@ -22,6 +23,39 @@ function Field({ label, children }) {
 const inputClass =
   'rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none';
 
+/** Small "copy the public share link" affordance, shown once a recipe is
+ * saved as Unlisted or Public (see the Visibility field below) — only
+ * shows in edit mode since a brand-new recipe doesn't have an id/URL yet
+ * until it's actually saved. Points at the `/r/:id` route PublicRecipePage
+ * renders (see App.jsx) — a plain path-based route, not React Router, to
+ * match how the rest of this single-page app already avoids a routing
+ * dependency. */
+function CopyLinkButton({ recipeId }) {
+  const [copied, setCopied] = useState(false);
+  const url = `${window.location.origin}/r/${recipeId}`;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy share link', err);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="mt-1 flex items-center gap-1.5 self-start font-mono text-[10px] uppercase tracking-wide text-amber-500 hover:text-amber-400"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      {copied ? 'Link copied' : 'Copy public link'}
+    </button>
+  );
+}
+
 function emptyForm() {
   return {
     title: '',
@@ -35,6 +69,7 @@ function emptyForm() {
     firearmId: '',
     factoryPricePerRound: '',
     notes: '',
+    visibility: 'private',
   };
 }
 
@@ -53,6 +88,7 @@ function formFromRecipe(recipe) {
     firearmId: recipe.firearmId || '',
     factoryPricePerRound: recipe.factoryPricePerRound != null ? String(recipe.factoryPricePerRound) : '',
     notes: recipe.notes || '',
+    visibility: recipe.visibility || 'private',
   };
 }
 
@@ -234,6 +270,7 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
     firearmId: form.firearmId,
     factoryPricePerRound: form.factoryPricePerRound ? Number.parseFloat(form.factoryPricePerRound) : null,
     notes: form.notes,
+    visibility: form.visibility,
   });
 
   const performSave = async () => {
@@ -421,6 +458,31 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
 
             <Field label="Notes">
               <textarea value={form.notes} onChange={update('notes')} rows={2} className={inputClass} />
+            </Field>
+
+            <Field
+              label={
+                <span className="flex items-center gap-1">
+                  Visibility
+                  <InfoTooltip>
+                    Private: only you can see this recipe. Unlisted: anyone with the direct link can
+                    view it (not searchable, not listed anywhere), useful for sharing with a friend
+                    without publishing it. Public: same as Unlisted, plus it's discoverable/indexable
+                    by search engines. Either Unlisted or Public is what makes the "Share Recipe" QR
+                    code on an exported target card actually point at this recipe instead of the
+                    app's homepage.
+                  </InfoTooltip>
+                </span>
+              }
+            >
+              <select value={form.visibility} onChange={update('visibility')} className={inputClass}>
+                <option value="private">Private (only you)</option>
+                <option value="unlisted">Unlisted (anyone with the link)</option>
+                <option value="public">Public (shareable + searchable)</option>
+              </select>
+              {isEditing && form.visibility !== 'private' && (
+                <CopyLinkButton recipeId={editingRecipe.id} />
+              )}
             </Field>
 
             {error && <p className="font-mono text-xs text-red-400">{error}</p>}
