@@ -14,6 +14,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
+import RecipeSpecsCard from './RecipeSpecsCard.jsx';
+import MoneySavedCard from './MoneySavedCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
 import RecipeNotesCard from './RecipeNotesCard.jsx';
@@ -631,6 +633,49 @@ export default function Dashboard({
             <MetricCard value={displayExtremeSpread} unit="FPS" label="FPS ES" />
           </div>
 
+          {/* Cost/Round, Loaded & Ready, Loadable From Stock, and Money
+              Saved — moved here from the Sidebar (see the sidebar redesign
+              discussion in the progress log), which was too cramped at
+              288px wide for four highlighted stats plus the full spec
+              sheet below. Same MetricCard shape as the FPS row above so
+              they read as one continuous HUD rather than two different
+              card styles stacked on top of each other. Money Saved keeps
+              its own card component since it has an inline editable price
+              field the other three don't need. All four render for the
+              demo recipe too (mockRecipe.js has a sample costPerRound;
+              MoneySavedCard self-hides when there's no real recipeId to
+              persist a price against). */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricCard
+              value={recipe.costPerRound != null ? `$${recipe.costPerRound.toFixed(2)}` : null}
+              label="Cost / Round"
+              info={`What one round of this recipe costs in components, from your own saved Inventory pricing. Shows "—" if any component doesn't have a saved price yet.`}
+            />
+            <MetricCard
+              value={recipe.roundsOnHand != null ? recipe.roundsOnHand : null}
+              unit="rds"
+              label="Loaded & Ready"
+              info="Rounds actually assembled and sitting ready to shoot right now — total rounds logged in a Loading Session, minus rounds logged as fired at the range."
+            />
+            <MetricCard
+              value={
+                recipe.loadableFromStock != null
+                  ? `${recipe.loadableFromStock}`
+                  : null
+              }
+              unit={recipe.loadableFromStock != null ? `(${recipe.loadableBottleneck})` : null}
+              label="Loadable From Stock"
+              info="How many MORE rounds you could load from raw components you have on hand — a raw-materials estimate, not rounds already assembled (that's Loaded & Ready above). Limited by whichever tracked component would run out first."
+            />
+            <MoneySavedCard
+              recipe={recipe}
+              recipeId={activeRecipeId}
+              onSaved={onSessionSaved ?? (() => Promise.resolve())}
+            />
+          </div>
+
+          <RecipeSpecsCard recipe={recipe} />
+
           {isRealRecipe ? (
             <>
               {matchingWorkup && (
@@ -850,6 +895,14 @@ export default function Dashboard({
         </div>
 
       <div className={dashboardTab === 'loading' ? 'rounded border border-slate-800 bg-panel p-4' : 'hidden'}>
+        {/* This tab was fairly bare on its own — a Rounds Loaded field and
+            a button, nothing to remind you what you're actually loading.
+            Same reference card as Overview, just here too so you don't
+            have to tab back and forth to check charge weight or which
+            bullet this recipe calls for while you're at the bench. */}
+        <div className="mb-4">
+          <RecipeSpecsCard recipe={recipe} />
+        </div>
         {!isRealRecipe && (
           <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
             <Boxes size={22} className="text-slate-700" />

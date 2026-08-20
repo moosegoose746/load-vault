@@ -370,7 +370,6 @@ function AppShell() {
                 setRecipeFormMode('create');
                 setRecipeFormOpen(true);
               }}
-              onRecipeUpdated={handleRecipeDataChanged}
               onViewArchived={() => setArchivedModalOpen(true)}
               liveMoa={liveMoa}
               liveDistanceYards={liveDistanceYards}
