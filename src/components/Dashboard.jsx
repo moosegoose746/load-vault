@@ -212,23 +212,6 @@ export default function Dashboard({
     }
   };
 
-  // The Loading Session tab now shows this same history inline (see the
-  // "what belongs on this tab" discussion in the progress log), so it
-  // needs to load without requiring a click on the Overview modal trigger
-  // first — fetch it the first time either surface asks for it.
-  useEffect(() => {
-    if (dashboardTab === 'loading' && loadingHistory === null && isRealRecipe) {
-      setLoadingHistoryLoading(true);
-      fetchLoadingHistory(activeRecipeId)
-        .then(setLoadingHistory)
-        .catch((err) => {
-          console.error('Failed to load loading history', err);
-          setLoadingHistory([]);
-        })
-        .finally(() => setLoadingHistoryLoading(false));
-    }
-  }, [dashboardTab, loadingHistory, isRealRecipe, activeRecipeId]);
-
   const openLoadingHistory = () => {
     setLoadingHistoryOpen(true);
     if (loadingHistory === null && isRealRecipe) {
@@ -268,6 +251,26 @@ export default function Dashboard({
   const [batchStatus, setBatchStatus] = useState('idle'); // idle | saving | saved | error
 
   const isRealRecipe = Boolean(activeRecipeId);
+
+  // The Loading Session tab now shows this same history inline (see the
+  // "what belongs on this tab" discussion in the progress log), so it
+  // needs to load without requiring a click on the Overview modal trigger
+  // first — fetch it the first time either surface asks for it. Placed
+  // after isRealRecipe (rather than up near the other lazy-loaded-history
+  // state/effects) since it needs to reference that const, which isn't
+  // declared until here.
+  useEffect(() => {
+    if (dashboardTab === 'loading' && loadingHistory === null && isRealRecipe) {
+      setLoadingHistoryLoading(true);
+      fetchLoadingHistory(activeRecipeId)
+        .then(setLoadingHistory)
+        .catch((err) => {
+          console.error('Failed to load loading history', err);
+          setLoadingHistory([]);
+        })
+        .finally(() => setLoadingHistoryLoading(false));
+    }
+  }, [dashboardTab, loadingHistory, isRealRecipe, activeRecipeId]);
 
   // Prefer the live reading from shots currently being plotted on the
   // target; fall back to whatever MOA was saved on the recipe's last range
