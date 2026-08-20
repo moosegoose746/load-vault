@@ -10,12 +10,15 @@ import InventoryPage from './components/InventoryPage.jsx';
 import FirearmsPage from './components/FirearmsPage.jsx';
 import WorkupsPage from './components/WorkupsPage.jsx';
 import ComparePage from './components/ComparePage.jsx';
+import ArchivedRecipesModal from './components/ArchivedRecipesModal.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import {
   archiveRecipe,
+  fetchArchivedRecipes,
   fetchLifetimeMoneySaved,
   fetchRecipeDetail,
   fetchUserRecipes,
+  restoreRecipe,
 } from './lib/recipes.js';
 
 // An on-page form rather than window.prompt() — native browser dialogs
@@ -110,6 +113,14 @@ function AppShell() {
   // edit mode later for an unrelated reason.
   const [recipeFormMode, setRecipeFormMode] = useState('create'); // 'create' | 'edit'
   const [recipeError, setRecipeError] = useState('');
+  // Archived Recipes modal — see ArchivedRecipesModal.jsx. Fetched lazily
+  // (only when the modal is actually opened, not on every app load) since
+  // most sessions never touch this view. `archivedRecipes` stays stale
+  // between opens within a session (re-fetched fresh each time the modal
+  // opens, see the effect below) rather than being cached indefinitely.
+  const [archivedModalOpen, setArchivedModalOpen] = useState(false);
+  const [archivedRecipes, setArchivedRecipes] = useState([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
   // Live MOA reading from the Target Analysis section (Dashboard), lifted up
   // here so the Sidebar's MOA badge can reflect shots being plotted right
   // now, not just whatever was saved on the recipe's last range session.
@@ -205,6 +216,37 @@ function AppShell() {
     [activeRecipeId, refreshRecipeList]
   );
 
+  // Re-fetch the archived list every time the modal opens, rather than
+  // fetching once and caching — cheap query, and guarantees a recipe
+  // deleted in a previous visit to this modal (or in another tab/device)
+  // never shows stale.
+  useEffect(() => {
+    if (!archivedModalOpen || !auth.user) return;
+    setArchivedLoading(true);
+    fetchArchivedRecipes(auth.user.id)
+      .then(setArchivedRecipes)
+      .catch((err) => console.error('Failed to load archived recipes', err))
+      .finally(() => setArchivedLoading(false));
+  }, [archivedModalOpen, auth.user]);
+
+  const handleRestoreRecipe = useCallback(
+    async (recipeId) => {
+      await restoreRecipe(recipeId);
+      // Both lists need updating: the recipe should now appear in the
+      // normal switcher, and disappear from the archived list it was
+      // just restored from.
+      await Promise.all([
+        refreshRecipeList(),
+        auth.user
+          ? fetchArchivedRecipes(auth.user.id)
+              .then(setArchivedRecipes)
+              .catch((err) => console.error('Failed to refresh archived recipes', err))
+          : Promise.resolve(),
+      ]);
+    },
+    [refreshRecipeList, auth.user]
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center font-mono text-amber-400">
@@ -267,6 +309,7 @@ function AppShell() {
               }}
               onDeleteRecipe={handleDeleteRecipe}
               onRecipeUpdated={handleRecipeDataChanged}
+              onViewArchived={() => setArchivedModalOpen(true)}
               liveMoa={liveMoa}
             />
             <Dashboard
@@ -310,6 +353,14 @@ function AppShell() {
           handleRecipeDataChanged();
         }}
         authUser={auth.user}
+      />
+
+      <ArchivedRecipesModal
+        open={archivedModalOpen}
+        onClose={() => setArchivedModalOpen(false)}
+        archivedRecipes={archivedRecipes}
+        loading={archivedLoading}
+        onRestore={handleRestoreRecipe}
       />
 
       {recipeError && (

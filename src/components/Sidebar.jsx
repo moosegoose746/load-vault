@@ -197,6 +197,7 @@ export default function Sidebar({
   onEditRecipe,
   onDeleteRecipe,
   onRecipeUpdated,
+  onViewArchived,
   liveMoa,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -275,6 +276,19 @@ export default function Sidebar({
               DELETE RECIPE
             </button>
           ))}
+
+        {/* Deleting a recipe is a soft delete (see archiveRecipe in
+            lib/recipes.js) — this is the way back to it. Always shown,
+            not just when a recipe is active/being deleted, since the
+            whole point is finding something you deleted a while ago. */}
+        {onViewArchived && (
+          <button
+            onClick={onViewArchived}
+            className="text-left font-mono text-[11px] text-slate-600 hover:text-amber-400"
+          >
+            View archived recipes
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col rounded border border-slate-800 bg-panel p-3">

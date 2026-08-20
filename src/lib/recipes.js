@@ -37,6 +37,43 @@ export async function fetchUserRecipes(userId) {
   return data;
 }
 
+/** The user's archived (soft-deleted) recipes — the flip side of
+ * fetchUserRecipes above (`is_archived = true` instead of `false`).
+ * Pulls in enough component context to show a real spec line per archived
+ * recipe (caliber/powder/bullet), not just a bare title, so the Archived
+ * Recipes view is actually useful for recognizing which one you're
+ * looking at before restoring it — same embedded-join shape
+ * fetchRecipeDetail uses, just without the range-session/inventory joins
+ * this lighter list view doesn't need. Ordered newest-archived-first is
+ * not possible (there's no `archived_at` column — see archiveRecipe
+ * below, which only flips a boolean), so this orders by `created_at`
+ * like the active list does; the "most recently deleted" ordering some
+ * users might expect isn't available without a schema change. */
+export async function fetchArchivedRecipes(userId) {
+  const { data, error } = await supabase
+    .from('load_recipes')
+    .select(
+      `
+      id, title, created_at,
+      calibers ( name ),
+      powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
+      bullet:components!load_recipes_bullet_id_fkey ( id, brand, model )
+    `
+    )
+    .eq('user_id', userId)
+    .eq('is_archived', true)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : null);
+  return (data || []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    caliber: row.calibers?.name ?? null,
+    powder: componentLabel(row.powder),
+    bullet: componentLabel(row.bullet),
+  }));
+}
+
 /** Cost of one unit of a component (one bullet, one primer, one case, or —
  * for powder — one grain), from the user's OWN saved inventory pricing —
  * never the shared `components.unit_cost` catalog field, which is just
@@ -457,6 +494,18 @@ export async function fetchRecipeDetail(recipeId, userId) {
  * covers the UPDATE. */
 export async function archiveRecipe(recipeId) {
   const { error } = await supabase.from('load_recipes').update({ is_archived: true }).eq('id', recipeId);
+  if (error) throw error;
+}
+
+/** Un-archive a recipe (sets is_archived = false) — the other half of
+ * archiveRecipe above. Since deleting was always a soft delete, restoring
+ * is just flipping the same flag back; nothing else needs to change, and
+ * the recipe's full history (loading sessions, range sessions, shot logs)
+ * was never touched by archiving in the first place, so it comes back
+ * exactly as it was. RLS's "Users manage own recipes" policy covers the
+ * UPDATE. */
+export async function restoreRecipe(recipeId) {
+  const { error } = await supabase.from('load_recipes').update({ is_archived: false }).eq('id', recipeId);
   if (error) throw error;
 }
 
