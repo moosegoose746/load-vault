@@ -600,7 +600,7 @@ export default function FirearmsPage({ authUser, onSelectRecipe }) {
       setFirearms((prev) => prev.filter((f) => f.id !== firearmId));
     } catch (err) {
       console.error('Failed to delete firearm', err);
-      setError('Failed to delete that firearm.');
+      setError(`Failed to delete that firearm.${err?.message ? ` (${err.message})` : ''}`);
     }
   };
 
