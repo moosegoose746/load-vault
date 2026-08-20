@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
 import MoaBadge from './MoaBadge.jsx';
 import InfoTooltip from './InfoTooltip.jsx';
 import { updateRecipeFactoryPrice } from '../lib/recipes.js';
@@ -220,7 +220,10 @@ export default function Sidebar({
   liveDistanceYards,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [recipeFilter, setRecipeFilter] = useState('');
+  const [caliberFilter, setCaliberFilter] = useState('');
+  const [firearmFilter, setFirearmFilter] = useState('');
+  const [componentFilter, setComponentFilter] = useState('');
+  const [sortByMoa, setSortByMoa] = useState(false);
 
   // Drop any pending delete confirmation if the selected recipe changes out
   // from under it (e.g. switching recipes mid-confirm).
@@ -228,31 +231,59 @@ export default function Sidebar({
     setConfirmingDelete(false);
   }, [activeRecipeId]);
 
-  // Only surface the filter box once there's actually enough recipes for
-  // scrolling a plain dropdown to get tedious — for a handful of recipes
-  // it'd just be clutter above a list that's already easy to scan.
-  const showRecipeFilter = (userRecipes?.length ?? 0) > 3;
-  // Matches on any field someone might actually search by: the recipe's
-  // own title, its caliber and firearm, each of the four components, and
-  // its best-ever group size — both as a bare number ("0.75") and with
-  // "moa" appended ("0.75 moa"), so either way of typing it hits. Fields
-  // that are null for a given recipe (no firearm linked, nothing fired
-  // yet) are just skipped rather than breaking the match.
-  const recipeSearchText = (r) =>
-    [r.title, r.caliber, r.firearm, r.powder, r.bullet, r.primer, r.brass, r.bestMoa != null ? `${r.bestMoa} moa` : null]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
+  // Only surface the filter row once there's actually enough recipes for
+  // scanning a plain dropdown to get tedious — for a handful of recipes
+  // it'd just be clutter above a list that's already easy to scan. Picked
+  // discrete dropdowns (populated only with values that actually appear
+  // among the user's own recipes, not every caliber/firearm/component in
+  // the system) over a free-text search box — a first version of this
+  // used a text input, but its results only showed up inside a closed
+  // <select>'s hidden option list, which read as "not working" even
+  // though the matching itself was fine. Dropdowns can't typo either.
+  const showRecipeFilters = (userRecipes?.length ?? 0) > 3;
+
+  const caliberOptions = useMemo(
+    () => Array.from(new Set((userRecipes || []).map((r) => r.caliber).filter(Boolean))).sort(),
+    [userRecipes]
+  );
+  const firearmOptions = useMemo(
+    () => Array.from(new Set((userRecipes || []).map((r) => r.firearm).filter(Boolean))).sort(),
+    [userRecipes]
+  );
+  const componentOptions = useMemo(
+    () =>
+      Array.from(
+        new Set((userRecipes || []).flatMap((r) => [r.powder, r.bullet, r.primer, r.brass]).filter(Boolean))
+      ).sort(),
+    [userRecipes]
+  );
+
   const filteredRecipes = useMemo(() => {
-    const q = recipeFilter.trim().toLowerCase();
-    if (!q) return userRecipes || [];
-    return (userRecipes || []).filter((r) => recipeSearchText(r).includes(q));
-  }, [userRecipes, recipeFilter]);
-  const demoMatches = !recipeFilter.trim() || 'demo recipe'.includes(recipeFilter.trim().toLowerCase());
-  // If the active recipe got filtered out from under the user (they typed
-  // something that no longer matches what's selected), keep the <select>
-  // showing it anyway rather than silently jumping to a different option —
-  // it's still selected, just not in the visible list otherwise.
+    let list = userRecipes || [];
+    if (caliberFilter) list = list.filter((r) => r.caliber === caliberFilter);
+    if (firearmFilter) list = list.filter((r) => r.firearm === firearmFilter);
+    if (componentFilter) {
+      list = list.filter((r) => [r.powder, r.bullet, r.primer, r.brass].includes(componentFilter));
+    }
+    if (sortByMoa) {
+      // Tightest group first; recipes with nothing recorded yet sink to
+      // the bottom rather than sorting as if a 0 MOA group were real.
+      list = [...list].sort((a, b) => {
+        if (a.bestMoa == null && b.bestMoa == null) return 0;
+        if (a.bestMoa == null) return 1;
+        if (b.bestMoa == null) return -1;
+        return a.bestMoa - b.bestMoa;
+      });
+    }
+    return list;
+  }, [userRecipes, caliberFilter, firearmFilter, componentFilter, sortByMoa]);
+
+  const anyFilterActive = Boolean(caliberFilter || firearmFilter || componentFilter);
+  const demoMatches = !anyFilterActive;
+  // If the active recipe got filtered out from under the user, keep the
+  // <select> showing it anyway rather than silently jumping to a
+  // different option — it's still selected, just not in the visible list
+  // otherwise.
   const activeRecipeStillListed = activeRecipeId ? filteredRecipes.some((r) => r.id === activeRecipeId) : true;
   const showDemoOption = demoMatches || !activeRecipeId;
   const selectOptions =
@@ -272,17 +303,74 @@ export default function Sidebar({
 
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>
-        {showRecipeFilter && (
-          <div className="relative">
-            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              type="text"
-              value={recipeFilter}
-              onChange={(e) => setRecipeFilter(e.target.value)}
-              placeholder="Filter by name, caliber, firearm, component, MOA…"
-              aria-label="Filter recipes by name, caliber, firearm, component, or best group size"
-              className="w-full rounded border border-slate-700 bg-slate-900 py-1.5 pl-8 pr-2 font-mono text-xs text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
-            />
+        {showRecipeFilters && (
+          <div className="flex flex-col gap-1.5">
+            <div className="grid grid-cols-1 gap-1.5">
+              <select
+                value={caliberFilter}
+                onChange={(e) => setCaliberFilter(e.target.value)}
+                aria-label="Filter by caliber"
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-xs text-slate-300 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">Caliber: All</option>
+                {caliberOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={firearmFilter}
+                onChange={(e) => setFirearmFilter(e.target.value)}
+                aria-label="Filter by firearm"
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-xs text-slate-300 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">Firearm: All</option>
+                {firearmOptions.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={componentFilter}
+                onChange={(e) => setComponentFilter(e.target.value)}
+                aria-label="Filter by component"
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-xs text-slate-300 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">Component: All</option>
+                {componentOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSortByMoa((v) => !v)}
+              className={`flex items-center gap-1.5 rounded border px-2 py-1.5 font-mono text-[11px] ${
+                sortByMoa
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                  : 'border-slate-700 text-slate-400 hover:border-slate-500'
+              }`}
+            >
+              <ArrowDownNarrowWide size={12} />
+              Sort by best MOA
+            </button>
+            {anyFilterActive && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCaliberFilter('');
+                  setFirearmFilter('');
+                  setComponentFilter('');
+                }}
+                className="self-start font-mono text-[10px] text-slate-500 hover:text-amber-400"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         )}
         <select
@@ -296,9 +384,9 @@ export default function Sidebar({
               {r.title}
             </option>
           ))}
-          {showRecipeFilter && selectOptions.length === 0 && !showDemoOption && (
+          {showRecipeFilters && selectOptions.length === 0 && !showDemoOption && (
             <option value="" disabled>
-              No recipes match "{recipeFilter}"
+              No recipes match these filters
             </option>
           )}
         </select>
