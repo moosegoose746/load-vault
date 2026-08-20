@@ -303,8 +303,23 @@ export default function Sidebar({
 
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>
+
+        {/* Its own clearly-labeled card, separate from the recipe list
+            below — narrowing/sorting and "which recipe is open" are two
+            different jobs, and cramming both into one undifferentiated
+            block was part of why this read as confusing. The live match
+            count is the fix for the actual bug that was reported: picking
+            a filter used to only change a closed <select>'s hidden
+            options, so nothing visibly happened. Now every change updates
+            a number right here, and the list right below it. */}
         {showRecipeFilters && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2 rounded border border-slate-800 bg-slate-900/40 p-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[11px] uppercase tracking-wide text-slate-400">Filter Recipes</span>
+              <span className="font-mono text-[10px] text-slate-500">
+                {filteredRecipes.length} of {userRecipes?.length ?? 0} match
+              </span>
+            </div>
             <div className="grid grid-cols-1 gap-1.5">
               <select
                 value={caliberFilter}
@@ -373,23 +388,52 @@ export default function Sidebar({
             )}
           </div>
         )}
-        <select
-          value={activeRecipeId ?? 'demo'}
-          onChange={(e) => onSelectRecipe(e.target.value === 'demo' ? null : e.target.value)}
-          className="rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
-        >
-          {showDemoOption && <option value="demo">Demo Recipe (sample data)</option>}
-          {selectOptions.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.title}
-            </option>
-          ))}
-          {showRecipeFilters && selectOptions.length === 0 && !showDemoOption && (
-            <option value="" disabled>
-              No recipes match these filters
-            </option>
+
+        {/* The actual picker — a real, always-visible list of clickable
+            rows instead of a native <select>, so filtering/sorting has
+            somewhere to actually show its result. Capped height with
+            internal scroll once there's more than a handful, so it can't
+            push the rest of the sidebar down. */}
+        <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded border border-slate-800 p-1">
+          {showDemoOption && (
+            <button
+              type="button"
+              onClick={() => onSelectRecipe(null)}
+              className={`rounded px-2.5 py-1.5 text-left transition-colors ${
+                !activeRecipeId ? 'bg-amber-500/10 text-amber-300' : 'text-slate-300 hover:bg-slate-800/60'
+              }`}
+            >
+              <span className="block font-mono text-sm">Demo Recipe</span>
+              <span className="block font-mono text-[10px] text-slate-500">Sample data</span>
+            </button>
           )}
-        </select>
+          {selectOptions.map((r) => {
+            const isActive = r.id === activeRecipeId;
+            // The one injected fallback row (active recipe filtered out
+            // from under the user) only carries id/title — fall back to
+            // the loaded recipe detail's own caliber/firearm for its
+            // subtitle rather than showing a blank second line.
+            const caliber = r.caliber ?? (isActive ? recipe.caliber : null);
+            const firearm = r.firearm ?? (isActive ? recipe.firearmLabel : null);
+            const subtitle = [caliber, firearm].filter(Boolean).join(' · ');
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onSelectRecipe(r.id)}
+                className={`rounded px-2.5 py-1.5 text-left transition-colors ${
+                  isActive ? 'bg-amber-500/10 text-amber-300' : 'text-slate-300 hover:bg-slate-800/60'
+                }`}
+              >
+                <span className="block font-mono text-sm">{r.title}</span>
+                {subtitle && <span className="block font-mono text-[10px] text-slate-500">{subtitle}</span>}
+              </button>
+            );
+          })}
+          {showRecipeFilters && selectOptions.length === 0 && !showDemoOption && (
+            <p className="p-2 text-center font-mono text-[11px] text-slate-500">No recipes match these filters</p>
+          )}
+        </div>
         <div className="flex gap-2">
           <button
             onClick={onNewRecipe}
