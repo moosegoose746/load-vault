@@ -464,7 +464,7 @@ export default function RecipeForm({ open, onClose, onCreated, onUpdated, authUs
               label={
                 <span className="flex items-center gap-1">
                   Visibility
-                  <InfoTooltip>
+                  <InfoTooltip align="left">
                     Private: only you can see this recipe. Unlisted: anyone with the direct link can
                     view it (not searchable, not listed anywhere), useful for sharing with a friend
                     without publishing it. Public: same as Unlisted, plus it's discoverable/indexable
