@@ -26,15 +26,60 @@ export async function fetchComponentsByType(type) {
   return data;
 }
 
+/** The user's active (non-archived) recipes, enriched with just enough of
+ * each recipe's caliber/firearm/components/best-group data for the
+ * Sidebar's recipe filter (see Sidebar.jsx) to search across without a
+ * second round trip per recipe. `bestMoa` is the tightest group_size_moa
+ * ever recorded across this recipe's range sessions — the smallest number,
+ * since a smaller MOA group is the better one — or `null` if nothing's
+ * been logged yet. Two queries (recipes, then a lightweight moa-only pull
+ * from range_sessions) rather than one big join, since Supabase's
+ * embedded-resource syntax can't express "aggregate MIN() per recipe" —
+ * the aggregation happens here in JS instead. */
 export async function fetchUserRecipes(userId) {
-  const { data, error } = await supabase
-    .from('load_recipes')
-    .select('id, title, created_at')
-    .eq('user_id', userId)
-    .eq('is_archived', false)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data;
+  const [recipesRes, sessionsRes] = await Promise.all([
+    supabase
+      .from('load_recipes')
+      .select(
+        `
+        id, title, created_at,
+        calibers ( name ),
+        firearm:firearms ( name ),
+        powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
+        bullet:components!load_recipes_bullet_id_fkey ( id, brand, model ),
+        primer:components!load_recipes_primer_id_fkey ( id, brand, model ),
+        brass:components!load_recipes_brass_id_fkey ( id, brand, model )
+      `
+      )
+      .eq('user_id', userId)
+      .eq('is_archived', false)
+      .order('created_at', { ascending: false }),
+    supabase.from('range_sessions').select('recipe_id, group_size_moa').eq('user_id', userId),
+  ]);
+  if (recipesRes.error) throw recipesRes.error;
+  if (sessionsRes.error) throw sessionsRes.error;
+
+  const bestMoaByRecipe = {};
+  for (const s of sessionsRes.data || []) {
+    if (s.group_size_moa == null) continue;
+    if (bestMoaByRecipe[s.recipe_id] == null || s.group_size_moa < bestMoaByRecipe[s.recipe_id]) {
+      bestMoaByRecipe[s.recipe_id] = s.group_size_moa;
+    }
+  }
+
+  const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : null);
+  return (recipesRes.data || []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    created_at: row.created_at,
+    caliber: row.calibers?.name ?? null,
+    firearm: row.firearm?.name ?? null,
+    powder: componentLabel(row.powder),
+    bullet: componentLabel(row.bullet),
+    primer: componentLabel(row.primer),
+    brass: componentLabel(row.brass),
+    bestMoa: bestMoaByRecipe[row.id] ?? null,
+  }));
 }
 
 /** The user's archived (soft-deleted) recipes — the flip side of

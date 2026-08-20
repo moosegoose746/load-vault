@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Check, User, X } from 'lucide-react';
+import { Check, Download, User, X } from 'lucide-react';
+import { downloadExportAsCsvZip, downloadExportAsJson, fetchFullExport } from '../lib/exportData.js';
 
 const inputClass =
   'rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none';
@@ -28,6 +29,9 @@ export default function SettingsModal({ open, onClose, user, profile, updateProf
   const [username, setUsername] = useState('');
   const [status, setStatus] = useState('idle'); // idle | saving | saved | error
   const [error, setError] = useState('');
+  const [exportStatus, setExportStatus] = useState('idle'); // idle | exporting | error
+  const [exportError, setExportError] = useState('');
+  const [exportFormat, setExportFormat] = useState('json'); // 'json' | 'csv'
 
   // Reset/prefill whenever the modal opens (or the underlying profile
   // changes while it's open, e.g. after a save) rather than on every
@@ -38,9 +42,30 @@ export default function SettingsModal({ open, onClose, user, profile, updateProf
     setUsername(profile?.username || '');
     setStatus('idle');
     setError('');
+    setExportStatus('idle');
+    setExportError('');
+    setExportFormat('json');
   }, [open, profile?.username]);
 
   if (!open) return null;
+
+  const handleExport = async () => {
+    if (!user?.id) return;
+    setExportStatus('exporting');
+    setExportError('');
+    try {
+      const data = await fetchFullExport(user.id);
+      if (exportFormat === 'csv') {
+        downloadExportAsCsvZip(data);
+      } else {
+        downloadExportAsJson(data);
+      }
+      setExportStatus('idle');
+    } catch (err) {
+      setExportError(err.message || 'Failed to export.');
+      setExportStatus('error');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -129,6 +154,50 @@ export default function SettingsModal({ open, onClose, user, profile, updateProf
             {status === 'saving' ? 'SAVING…' : status === 'saved' ? 'SAVED' : 'SAVE CHANGES'}
           </button>
         </form>
+
+        <div className="flex flex-col gap-1.5 border-t border-slate-800 pt-4">
+          <span className="font-mono text-[11px] uppercase tracking-wide text-slate-400">Your Data</span>
+          <p className="font-mono text-[10px] text-slate-600">
+            Download every firearm, inventory row, recipe, and range session on this account — a personal
+            backup, or something to move to another tool. JSON keeps everything in one nested file; CSV
+            gives you a .zip of spreadsheet-ready tables (recipes, range sessions, shots, etc.), split the
+            same way the data is actually organized.
+          </p>
+          <div className="mt-1 flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setExportFormat('json')}
+              className={`flex-1 rounded border px-3 py-1.5 font-mono text-[11px] ${
+                exportFormat === 'json'
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                  : 'border-slate-700 text-slate-400 hover:border-slate-500'
+              }`}
+            >
+              JSON
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportFormat('csv')}
+              className={`flex-1 rounded border px-3 py-1.5 font-mono text-[11px] ${
+                exportFormat === 'csv'
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                  : 'border-slate-700 text-slate-400 hover:border-slate-500'
+              }`}
+            >
+              CSV (.zip)
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exportStatus === 'exporting'}
+            className="mt-1 flex items-center justify-center gap-1.5 rounded border border-slate-700 px-4 py-2 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400 disabled:opacity-40"
+          >
+            <Download size={14} />
+            {exportStatus === 'exporting' ? 'PREPARING EXPORT…' : `EXPORT MY DATA (${exportFormat.toUpperCase()})`}
+          </button>
+          {exportError && <p className="font-mono text-xs text-red-400">{exportError}</p>}
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import MoaBadge from './MoaBadge.jsx';
 import InfoTooltip from './InfoTooltip.jsx';
 import { updateRecipeFactoryPrice } from '../lib/recipes.js';
@@ -178,6 +178,24 @@ function MoneySavedRow({ recipe, recipeId, onSaved }) {
     );
   }
 
+  // moneySaved is null for two different reasons, and the CTA needs to
+  // name the right one: either no factory price has been entered yet, or
+  // one has, but costPerRound itself is null because some component on
+  // this recipe still doesn't have a saved Inventory price (now that
+  // pricing is optional, this got a lot more likely to happen — see the
+  // Cost/Round row's tooltip above). Telling someone to "add a factory
+  // price" they already added would send them chasing the wrong field.
+  if (recipe.factoryPricePerRound != null) {
+    return (
+      <button
+        onClick={startEditing}
+        className="rounded border border-dashed border-slate-700 px-2 py-1.5 text-left font-mono text-[11px] text-slate-500 hover:border-amber-500 hover:text-amber-400"
+      >
+        Money saved needs a price for every component — add pricing in Inventory
+      </button>
+    );
+  }
+
   return (
     <button
       onClick={startEditing}
@@ -202,12 +220,43 @@ export default function Sidebar({
   liveDistanceYards,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [recipeFilter, setRecipeFilter] = useState('');
 
   // Drop any pending delete confirmation if the selected recipe changes out
   // from under it (e.g. switching recipes mid-confirm).
   useEffect(() => {
     setConfirmingDelete(false);
   }, [activeRecipeId]);
+
+  // Only surface the filter box once there's actually enough recipes for
+  // scrolling a plain dropdown to get tedious — for a handful of recipes
+  // it'd just be clutter above a list that's already easy to scan.
+  const showRecipeFilter = (userRecipes?.length ?? 0) > 3;
+  // Matches on any field someone might actually search by: the recipe's
+  // own title, its caliber and firearm, each of the four components, and
+  // its best-ever group size — both as a bare number ("0.75") and with
+  // "moa" appended ("0.75 moa"), so either way of typing it hits. Fields
+  // that are null for a given recipe (no firearm linked, nothing fired
+  // yet) are just skipped rather than breaking the match.
+  const recipeSearchText = (r) =>
+    [r.title, r.caliber, r.firearm, r.powder, r.bullet, r.primer, r.brass, r.bestMoa != null ? `${r.bestMoa} moa` : null]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+  const filteredRecipes = useMemo(() => {
+    const q = recipeFilter.trim().toLowerCase();
+    if (!q) return userRecipes || [];
+    return (userRecipes || []).filter((r) => recipeSearchText(r).includes(q));
+  }, [userRecipes, recipeFilter]);
+  const demoMatches = !recipeFilter.trim() || 'demo recipe'.includes(recipeFilter.trim().toLowerCase());
+  // If the active recipe got filtered out from under the user (they typed
+  // something that no longer matches what's selected), keep the <select>
+  // showing it anyway rather than silently jumping to a different option —
+  // it's still selected, just not in the visible list otherwise.
+  const activeRecipeStillListed = activeRecipeId ? filteredRecipes.some((r) => r.id === activeRecipeId) : true;
+  const showDemoOption = demoMatches || !activeRecipeId;
+  const selectOptions =
+    activeRecipeId && !activeRecipeStillListed ? [{ id: activeRecipeId, title: recipe.title }, ...filteredRecipes] : filteredRecipes;
 
   // Prefer the live reading from shots currently being plotted on the
   // target; fall back to whatever MOA was saved on the recipe's last range
@@ -223,17 +272,35 @@ export default function Sidebar({
 
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>
+        {showRecipeFilter && (
+          <div className="relative">
+            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={recipeFilter}
+              onChange={(e) => setRecipeFilter(e.target.value)}
+              placeholder="Filter by name, caliber, firearm, component, MOA…"
+              aria-label="Filter recipes by name, caliber, firearm, component, or best group size"
+              className="w-full rounded border border-slate-700 bg-slate-900 py-1.5 pl-8 pr-2 font-mono text-xs text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
+            />
+          </div>
+        )}
         <select
           value={activeRecipeId ?? 'demo'}
           onChange={(e) => onSelectRecipe(e.target.value === 'demo' ? null : e.target.value)}
           className="rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
         >
-          <option value="demo">Demo Recipe (sample data)</option>
-          {(userRecipes || []).map((r) => (
+          {showDemoOption && <option value="demo">Demo Recipe (sample data)</option>}
+          {selectOptions.map((r) => (
             <option key={r.id} value={r.id}>
               {r.title}
             </option>
           ))}
+          {showRecipeFilter && selectOptions.length === 0 && !showDemoOption && (
+            <option value="" disabled>
+              No recipes match "{recipeFilter}"
+            </option>
+          )}
         </select>
         <div className="flex gap-2">
           <button
