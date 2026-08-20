@@ -52,7 +52,7 @@ export default function InfoTooltip({ children, side = 'bottom', align = 'center
       {open && (
         <span
           onClick={(e) => e.stopPropagation()}
-          className={`absolute z-30 w-56 ${horizontalClass} ${verticalClass} rounded border border-slate-700 bg-slate-900 p-2.5 font-mono text-[11px] font-normal normal-case leading-snug tracking-normal text-slate-300 shadow-lg shadow-black/40`}
+          className={`absolute z-30 w-56 whitespace-normal ${horizontalClass} ${verticalClass} rounded border border-slate-700 bg-slate-900 p-2.5 font-mono text-[11px] font-normal normal-case leading-snug tracking-normal text-slate-300 shadow-lg shadow-black/40`}
         >
           {children}
         </span>
