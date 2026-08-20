@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Scale, X } from 'lucide-react';
+import { Scale, Trophy, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
 import { fetchUserRecipes, fetchRecipeDetail } from '../lib/recipes.js';
 
@@ -25,6 +25,14 @@ const moneyFmt = (value) => (value == null ? '—' : `$${Number(value).toFixed(2
 
 // One row per spec/stat, in display order. `get` pulls the value off a
 // mapRecipeRow-shaped detail object; `format` turns it into display text.
+// `better` — 'lower' | 'higher' | null — is what powers the winner badge
+// (see computeRowState below): only set on rows where "which one wins"
+// is an objective, unambiguous call a reloader would actually make
+// (cheaper cost/round, tighter groups, more stock on hand). Left null on
+// pure specs (caliber, powder, etc. — there's no "better" caliber) and on
+// numbers that don't have one universally correct direction (Avg
+// Velocity, Charge Weight, Distance — a higher or lower value isn't
+// inherently better, it's just different).
 const ROWS = [
   { label: 'Caliber', get: (r) => r.caliber, format: (v) => v || '—' },
   { label: 'Powder', get: (r) => r.powder, format: (v) => v || '—' },
@@ -34,28 +42,69 @@ const ROWS = [
   { label: 'Brass', get: (r) => r.brass, format: (v) => v || '—' },
   { label: 'COAL', get: (r) => r.coalInches, format: (v) => (v != null ? `${v}"` : '—') },
   { label: 'Firearm', get: (r) => r.firearmLabel, format: (v) => v || '—' },
-  { label: 'Cost / Round', get: (r) => r.costPerRound, format: moneyFmt, highlight: true },
-  { label: 'Money Saved', get: (r) => r.moneySaved, format: moneyFmt, highlight: true },
+  { label: 'Cost / Round', get: (r) => r.costPerRound, format: moneyFmt, better: 'lower' },
+  { label: 'Money Saved', get: (r) => r.moneySaved, format: moneyFmt, better: 'higher' },
   {
     label: 'Avg Velocity',
     get: (r) => r.avgVelocity,
     format: (v) => (v != null ? `${numberFmt(v)} fps` : '—'),
   },
-  { label: 'SD', get: (r) => r.stdDevFps, format: (v) => (v != null ? numberFmt(v, 1) : '—') },
-  { label: 'ES', get: (r) => r.extremeSpread, format: (v) => (v != null ? numberFmt(v, 1) : '—') },
+  { label: 'SD', get: (r) => r.stdDevFps, format: (v) => (v != null ? numberFmt(v, 1) : '—'), better: 'lower' },
+  { label: 'ES', get: (r) => r.extremeSpread, format: (v) => (v != null ? numberFmt(v, 1) : '—'), better: 'lower' },
   {
     label: 'Group Size',
     get: (r) => r.groupSizeMoa,
     format: (v) => (v != null ? `${numberFmt(v, 2)} MOA` : '—'),
+    better: 'lower',
   },
   { label: 'Distance', get: (r) => r.distanceYards, format: (v) => (v != null ? `${v} yd` : '—') },
-  { label: 'Loaded & Ready', get: (r) => r.roundsOnHand, format: (v) => (v != null ? `${v} rds` : '—') },
+  {
+    label: 'Loaded & Ready',
+    get: (r) => r.roundsOnHand,
+    format: (v) => (v != null ? `${v} rds` : '—'),
+    better: 'higher',
+  },
   {
     label: 'Loadable From Stock',
     get: (r) => r.loadableFromStock,
     format: (v) => (v != null ? `${v} rds` : '—'),
+    better: 'higher',
   },
 ];
+
+/** For one row, across every recipe whose detail has actually loaded:
+ * (1) whether every displayed value is identical — used to dim the row,
+ * so a glance down the label column tells you which specs/stats are
+ * shared vs. which ones actually distinguish these recipes, rather than
+ * making you read every cell to find that out yourself; (2) which
+ * recipe id(s) hold the "winning" value, if this row has a `better`
+ * direction — ties (two recipes sharing the best value) both win, since
+ * picking one arbitrarily would be misleading. Recipes still loading, or
+ * with no value for this row, are excluded from both checks rather than
+ * counted as a default 0/empty that could falsely win or falsely break
+ * the "all same" check. */
+function computeRowState(row, recipes, details) {
+  const loaded = recipes.filter((r) => details[r.id]);
+  if (loaded.length < 2) return { allSame: false, winnerIds: new Set() };
+
+  const displayValues = loaded.map((r) => row.format(row.get(details[r.id])));
+  const allSame = displayValues.every((v) => v === displayValues[0]);
+
+  const winnerIds = new Set();
+  if (!allSame && row.better) {
+    const numeric = loaded
+      .map((r) => ({ id: r.id, value: row.get(details[r.id]) }))
+      .filter((entry) => entry.value != null && !Number.isNaN(Number(entry.value)));
+    if (numeric.length >= 2) {
+      const extreme =
+        row.better === 'lower'
+          ? Math.min(...numeric.map((e) => Number(e.value)))
+          : Math.max(...numeric.map((e) => Number(e.value)));
+      numeric.filter((e) => Number(e.value) === extreme).forEach((e) => winnerIds.add(e.id));
+    }
+  }
+  return { allSame, winnerIds };
+}
 
 export default function ComparePage({ authUser }) {
   const [recipeList, setRecipeList] = useState([]);
@@ -109,6 +158,18 @@ export default function ComparePage({ authUser }) {
     [selectedIds, recipeList]
   );
 
+  // Row diff/winner state, recomputed whenever the selection or the
+  // fetched details change — see computeRowState above.
+  const rowStates = useMemo(() => {
+    const map = {};
+    ROWS.forEach((row) => {
+      map[row.label] = computeRowState(row, selectedRecipes, details);
+    });
+    return map;
+  }, [selectedRecipes, details]);
+
+  const anyWinnerBadges = Object.values(rowStates).some((s) => s.winnerIds.size > 0);
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-4">
       <div className="flex items-center gap-2">
@@ -117,8 +178,9 @@ export default function ComparePage({ authUser }) {
         <InfoTooltip>
           Pick two or more of your recipes to see their specs and stats side by side — cost per
           round, velocity stats, group size, and how much of each is currently loaded or loadable
-          from stock. No chart here; for a charge-weight-vs-velocity ladder chart, use a Load
-          Workup instead.
+          from stock. Rows where every recipe matches are dimmed; rows that differ are highlighted,
+          with the best value (cheapest, tightest, most stock) marked with a trophy. No chart here;
+          for a charge-weight-vs-velocity ladder chart, use a Load Workup instead.
         </InfoTooltip>
       </div>
 
@@ -165,68 +227,92 @@ export default function ComparePage({ authUser }) {
       ) : selectedRecipes.length === 1 ? (
         <p className="font-mono text-xs text-slate-500">Pick at least one more recipe to compare.</p>
       ) : (
-        <div className="overflow-x-auto rounded border border-slate-700 bg-slate-900/60">
-          <table className="min-w-full border-collapse font-mono text-xs">
-            <thead>
-              <tr>
-                <th className="sticky left-0 z-10 border-b border-r border-slate-700 bg-slate-900 px-3 py-2 text-left text-slate-400">
-                  &nbsp;
-                </th>
-                {selectedRecipes.map((r) => (
-                  <th
-                    key={r.id}
-                    className="min-w-[160px] border-b border-slate-700 px-3 py-2 text-left text-amber-300"
-                  >
-                    {r.title}
+        <div className="flex flex-col gap-2">
+          {anyWinnerBadges && (
+            <p className="flex items-center gap-1.5 font-mono text-[11px] text-slate-500">
+              <Trophy size={12} className="text-emerald-400" />
+              marks the best value in a row (cheapest cost/round, most money saved, tightest
+              group/SD/ES, most rounds on hand)
+            </p>
+          )}
+          <div className="overflow-x-auto rounded border border-slate-700 bg-slate-900/60">
+            <table className="min-w-full border-collapse font-mono text-xs">
+              <thead>
+                <tr>
+                  <th className="sticky left-0 z-10 border-b border-r border-slate-700 bg-slate-900 px-3 py-2 text-left text-slate-400">
+                    &nbsp;
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {ROWS.map((row) => (
-                <tr key={row.label} className="odd:bg-slate-900/40">
-                  <td className="sticky left-0 z-10 border-r border-slate-700 bg-slate-900 px-3 py-2 text-slate-400 odd:bg-slate-900">
-                    {row.label}
-                  </td>
-                  {selectedRecipes.map((r) => {
-                    const detail = details[r.id];
-                    if (loadingIds.includes(r.id)) {
-                      return (
-                        <td key={r.id} className="px-3 py-2 text-slate-600">
-                          loading…
-                        </td>
-                      );
-                    }
-                    if (detailErrors[r.id]) {
-                      return (
-                        <td key={r.id} className="px-3 py-2 text-red-400">
-                          error
-                        </td>
-                      );
-                    }
-                    if (!detail) {
-                      return (
-                        <td key={r.id} className="px-3 py-2 text-slate-600">
-                          —
-                        </td>
-                      );
-                    }
-                    const value = row.get(detail);
-                    return (
+                  {selectedRecipes.map((r) => (
+                    <th
+                      key={r.id}
+                      className="min-w-[160px] border-b border-slate-700 px-3 py-2 text-left text-amber-300"
+                    >
+                      {r.title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ROWS.map((row) => {
+                  const { allSame, winnerIds } = rowStates[row.label];
+                  return (
+                    <tr key={row.label} className={allSame ? 'opacity-40' : 'odd:bg-slate-900/40'}>
                       <td
-                        key={r.id}
-                        className={`px-3 py-2 ${
-                          row.highlight ? 'font-semibold text-amber-300' : 'text-slate-200'
+                        className={`sticky left-0 z-10 border-r border-slate-700 px-3 py-2 ${
+                          allSame ? 'bg-slate-900 text-slate-500' : 'bg-slate-900 font-semibold text-slate-300'
                         }`}
                       >
-                        {row.format(value)}
+                        {row.label}
                       </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      {selectedRecipes.map((r) => {
+                        const detail = details[r.id];
+                        if (loadingIds.includes(r.id)) {
+                          return (
+                            <td key={r.id} className="px-3 py-2 text-slate-600">
+                              loading…
+                            </td>
+                          );
+                        }
+                        if (detailErrors[r.id]) {
+                          return (
+                            <td key={r.id} className="px-3 py-2 text-red-400">
+                              error
+                            </td>
+                          );
+                        }
+                        if (!detail) {
+                          return (
+                            <td key={r.id} className="px-3 py-2 text-slate-600">
+                              —
+                            </td>
+                          );
+                        }
+                        const value = row.get(detail);
+                        const isWinner = winnerIds.has(r.id);
+                        return (
+                          <td
+                            key={r.id}
+                            className={`px-3 py-2 ${
+                              isWinner
+                                ? 'font-semibold text-emerald-300'
+                                : allSame
+                                  ? 'text-slate-500'
+                                  : 'text-slate-200'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              {isWinner && <Trophy size={11} className="shrink-0 text-emerald-400" />}
+                              {row.format(value)}
+                            </span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
