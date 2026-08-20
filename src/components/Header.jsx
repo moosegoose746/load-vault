@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Scale, Sun, X } from 'lucide-react';
+import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Scale, Settings, Sun, X } from 'lucide-react';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
 
 // Section 3: "Hero Header / Navigation Bar — Amber/gold logo, Sync Status
@@ -51,7 +51,7 @@ function LifetimeSavedBadge({ amount }) {
   );
 }
 
-export default function Header({ user, onSignOut, view = 'vault', onChangeView, lifetimeSaved }) {
+export default function Header({ user, onSignOut, onOpenSettings, view = 'vault', onChangeView, lifetimeSaved }) {
   const { rangeMode, toggleRangeMode } = useRangeMode();
   const [mobileOpen, setMobileOpen] = useState(false);
   const otherViews = VIEWS.filter((v) => v.key !== view);
@@ -92,6 +92,15 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView, 
             <Sun size={14} />
             RANGE MODE
           </button>
+          {user && (
+            <button
+              onClick={onOpenSettings}
+              aria-label="Account settings"
+              className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+            >
+              <Settings size={14} />
+            </button>
+          )}
           {user && (
             <button
               onClick={onSignOut}
@@ -142,6 +151,18 @@ export default function Header({ user, onSignOut, view = 'vault', onChangeView, 
             <Sun size={14} />
             RANGE MODE
           </button>
+          {user && (
+            <button
+              onClick={() => {
+                onOpenSettings?.();
+                setMobileOpen(false);
+              }}
+              className="flex items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-2 font-mono text-xs text-slate-300"
+            >
+              <Settings size={14} />
+              SETTINGS
+            </button>
+          )}
           {user && (
             <button
               onClick={onSignOut}

@@ -12,6 +12,7 @@ import WorkupsPage from './components/WorkupsPage.jsx';
 import ComparePage from './components/ComparePage.jsx';
 import ArchivedRecipesModal from './components/ArchivedRecipesModal.jsx';
 import PublicRecipePage from './components/PublicRecipePage.jsx';
+import SettingsModal from './components/SettingsModal.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import {
   archiveRecipe,
@@ -122,6 +123,10 @@ function AppShell() {
   const [archivedModalOpen, setArchivedModalOpen] = useState(false);
   const [archivedRecipes, setArchivedRecipes] = useState([]);
   const [archivedLoading, setArchivedLoading] = useState(false);
+  // Account Settings modal (username edit) — see SettingsModal.jsx. Closes
+  // the "no settings page exists" gap from the five-persona review; opened
+  // from the new gear icon in Header.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Live MOA reading from the Target Analysis section (Dashboard), lifted up
   // here so the Sidebar's MOA badge can reflect shots being plotted right
   // now, not just whatever was saved on the recipe's last range session.
@@ -270,6 +275,7 @@ function AppShell() {
       <Header
         user={user}
         onSignOut={auth.signOut}
+        onOpenSettings={() => setSettingsOpen(true)}
         view={view}
         onChangeView={setView}
         lifetimeSaved={lifetimeSaved}
@@ -362,6 +368,14 @@ function AppShell() {
         archivedRecipes={archivedRecipes}
         loading={archivedLoading}
         onRestore={handleRestoreRecipe}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        user={auth.user}
+        profile={auth.profile}
+        updateProfile={auth.updateProfile}
       />
 
       {recipeError && (
