@@ -812,10 +812,13 @@ export async function updateRecipeNotes(recipeId, notes) {
 /** Upload a compressed target-photo Blob to Supabase Storage and return its
  * public URL. Stored under `${userId}/<timestamp>.webp` in the
  * `target-images` bucket, which is public-read / authenticated-write (see
- * "STORAGE BUCKET SECURITY" in supabase/schema.sql) — a trigger on
- * range_sessions already cleans up the old file whenever a session's
- * target_image_url changes or the session is deleted, so this doesn't need
- * to worry about orphaned files itself. */
+ * "STORAGE BUCKET SECURITY" in supabase/schema.sql). Nothing currently
+ * updates or hard-deletes a range_sessions row after it's created, so
+ * there's no orphaned-file cleanup to do yet — if that ever changes,
+ * clean up the old file the same way deleteFirearmPhoto in
+ * lib/firearms.js does (the real Storage API from application code, not
+ * a database trigger — see schema_fix_storage_delete.sql for why a
+ * trigger can't do this on Supabase). */
 async function uploadTargetImage(blob, userId) {
   const path = `${userId}/${Date.now()}.webp`;
   const { error } = await supabase.storage.from('target-images').upload(path, blob, {

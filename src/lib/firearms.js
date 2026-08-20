@@ -154,12 +154,33 @@ export async function createFirearm(userId, fields, photoFile) {
   return data;
 }
 
+/** Best-effort removal of a firearm photo from Storage, given its public
+ * URL. Supabase does not allow deleting from `storage.objects` directly
+ * via SQL (a DB trigger that tried this fails with "Direct deletion from
+ * storage tables is not allowed"), so cleanup has to go through the real
+ * Storage API from the client instead — this is that call. Failures here
+ * are logged but never thrown; a leftover orphaned file in Storage is a
+ * minor cleanup issue, not a reason to fail the firearm update/delete
+ * that's actually the point of the operation. */
+async function deleteFirearmPhoto(photoUrl) {
+  if (!photoUrl) return;
+  try {
+    const path = photoUrl.replace(/.*firearm-images\//, '');
+    const { error } = await supabase.storage.from('firearm-images').remove([path]);
+    if (error) console.error('Failed to remove old firearm photo from storage', error);
+  } catch (err) {
+    console.error('Failed to remove old firearm photo from storage', err);
+  }
+}
+
 /** Update an existing firearm profile. Passing a new `photoFile` replaces
- * the photo (the old one is cleaned up automatically by the storage
- * trigger — see schema_firearms.sql); passing `removePhoto: true` clears
- * it without setting a new one. */
+ * the photo (the old one is removed from Storage afterward via
+ * `deleteFirearmPhoto`); passing `removePhoto: true` clears it without
+ * setting a new one — either way, cleanup only runs once the row update
+ * itself has succeeded, and never blocks it. */
 export async function updateFirearm(firearmId, fields, userId, photoFile, removePhoto) {
-  let photoUrl = fields.existingPhotoUrl ?? null;
+  const oldPhotoUrl = fields.existingPhotoUrl ?? null;
+  let photoUrl = oldPhotoUrl;
   if (photoFile) {
     try {
       photoUrl = await uploadFirearmPhoto(photoFile, userId);
@@ -189,13 +210,31 @@ export async function updateFirearm(firearmId, fields, userId, photoFile, remove
     .select('*, caliber:calibers ( id, name )')
     .single();
   if (error) throw error;
+
+  if (oldPhotoUrl && oldPhotoUrl !== photoUrl) {
+    await deleteFirearmPhoto(oldPhotoUrl);
+  }
+
   return data;
 }
 
 /** Delete a firearm profile. Any range_sessions that referenced it keep
  * their round history — `firearm_id` just goes to NULL (ON DELETE SET
- * NULL) rather than the sessions themselves disappearing. */
+ * NULL) rather than the sessions themselves disappearing. Its photo (if
+ * any) is looked up first and removed from Storage via the real Storage
+ * API AFTER the row itself is gone, so a Storage hiccup never blocks the
+ * actual delete the user asked for. */
 export async function deleteFirearm(firearmId) {
+  const { data: existing } = await supabase
+    .from('firearms')
+    .select('photo_url')
+    .eq('id', firearmId)
+    .single();
+
   const { error } = await supabase.from('firearms').delete().eq('id', firearmId);
   if (error) throw error;
+
+  if (existing?.photo_url) {
+    await deleteFirearmPhoto(existing.photo_url);
+  }
 }
