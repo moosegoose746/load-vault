@@ -367,7 +367,7 @@ export default function ComparePage({ authUser }) {
         </p>
         {recipeList.length === 0 ? (
           <p className="font-mono text-xs text-slate-500">
-            You don't have any saved recipes yet — save one from the Vault first.
+            You don't have any saved recipes yet — save one from Recipes first.
           </p>
         ) : (
           <div className="flex flex-wrap gap-2">

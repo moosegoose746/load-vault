@@ -13,6 +13,7 @@ import ComparePage from './components/ComparePage.jsx';
 import ArchivedRecipesModal from './components/ArchivedRecipesModal.jsx';
 import PublicRecipePage from './components/PublicRecipePage.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
+import GettingStartedCard from './components/GettingStartedCard.jsx';
 import { mockRecipe } from './data/mockRecipe.js';
 import {
   archiveRecipe,
@@ -22,6 +23,7 @@ import {
   fetchUserRecipes,
   restoreRecipe,
 } from './lib/recipes.js';
+import { fetchOnboardingProgress } from './lib/onboarding.js';
 
 // An on-page form rather than window.prompt() — native browser dialogs
 // get silently swallowed inside some embedded preview panels (e.g. VS
@@ -140,6 +142,11 @@ function AppShell() {
   // EVERY recipe with a factory price set, not just whichever one is
   // currently open, so it needs its own fetch + refresh.
   const [lifetimeSaved, setLifetimeSaved] = useState(null);
+  // "Getting Started" checklist (see GettingStartedCard.jsx) — null while
+  // unknown/not applicable (not signed in, already dismissed, or not
+  // fetched yet), otherwise { hasFirearm, hasInventory }. `hasRecipe` isn't
+  // stored here since userRecipes above already covers it for free.
+  const [onboardingProgress, setOnboardingProgress] = useState(null);
 
   const refreshRecipeList = useCallback(async () => {
     if (!auth.user) return;
@@ -201,6 +208,38 @@ function AppShell() {
   useEffect(() => {
     refreshLifetimeSaved();
   }, [refreshLifetimeSaved]);
+
+  // Re-check Getting Started progress whenever the view changes, so
+  // stepping over to Firearms/Inventory and back to Recipes picks up
+  // anything just added — cheap (two count-only queries), and skipped
+  // entirely once the card's been dismissed or auto-completed. Re-fetches
+  // per `view` change rather than needing Firearms/InventoryPage to report
+  // back up, since neither lifts its state to App.jsx otherwise.
+  useEffect(() => {
+    if (!auth.user || !auth.profile || auth.profile.onboarding_dismissed) {
+      setOnboardingProgress(null);
+      return;
+    }
+    fetchOnboardingProgress(auth.user.id)
+      .then(setOnboardingProgress)
+      .catch((err) => console.error('Failed to load onboarding progress', err));
+  }, [auth.user, auth.profile, view]);
+
+  // Auto-dismiss the checklist for good once all three steps are actually
+  // true — a returning/established account with real data shouldn't have
+  // to manually close a card that's already fully checked off, and this
+  // also covers existing accounts the very first time they load the app
+  // after this shipped (see schema_onboarding.sql).
+  useEffect(() => {
+    if (!onboardingProgress || !auth.profile || auth.profile.onboarding_dismissed) return;
+    const allDone = onboardingProgress.hasFirearm && onboardingProgress.hasInventory && userRecipes.length > 0;
+    if (allDone) {
+      auth.updateProfile({ onboarding_dismissed: true }).catch((err) => {
+        console.error('Failed to auto-dismiss onboarding checklist', err);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingProgress, userRecipes.length, auth.profile]);
 
   // Reset the live MOA reading (and its paired distance) whenever the
   // active recipe changes, so switching recipes doesn't leave a stale
@@ -304,6 +343,23 @@ function AppShell() {
         ) : view === 'compare' ? (
           <ComparePage authUser={auth.user} />
         ) : (
+          <>
+          {onboardingProgress && !auth.profile?.onboarding_dismissed && (
+            <div className="mx-auto w-full max-w-7xl px-4 pt-4">
+              <GettingStartedCard
+                hasFirearm={onboardingProgress.hasFirearm}
+                hasInventory={onboardingProgress.hasInventory}
+                hasRecipe={userRecipes.length > 0}
+                onGoTo={setView}
+                onDismiss={() => {
+                  setOnboardingProgress(null);
+                  auth.updateProfile({ onboarding_dismissed: true }).catch((err) => {
+                    console.error('Failed to dismiss onboarding checklist', err);
+                  });
+                }}
+              />
+            </div>
+          )}
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar
               recipe={activeRecipe}
@@ -340,6 +396,7 @@ function AppShell() {
               }}
             />
           </div>
+          </>
         )
       ) : (
         <SignInGate onSignIn={auth.signInWithEmail} />

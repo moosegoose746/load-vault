@@ -23,7 +23,10 @@ import { useRangeMode } from '../context/RangeModeContext.jsx';
 // until a real recipe's Range Session save actually goes through it. See
 // the progress log's "Known gaps" for that as a future Tier 2/3 item.
 const VIEWS = [
-  { key: 'vault', label: 'VAULT', icon: Crosshair },
+  // Label reads "RECIPES" — the internal key stays 'vault' (App.jsx's view
+  // state, useAuth defaults, etc. all still key off it) so this is purely
+  // a display-text rename, not a routing change.
+  { key: 'vault', label: 'RECIPES', icon: Crosshair },
   { key: 'inventory', label: 'INVENTORY', icon: Boxes },
   { key: 'firearms', label: 'FIREARMS', icon: Layers },
   { key: 'workups', label: 'WORKUPS', icon: Beaker },

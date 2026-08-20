@@ -5,8 +5,9 @@ import { supabase } from '../lib/supabaseClient.js';
  * useAuth — session + profile state for Precision Load Vault.
  *
  * Wraps Supabase Auth (magic-link email, no password infra to run) and
- * keeps the matching `profiles` row (username, is_pro, stripe_customer_id)
- * in sync so components can read plan status without a second fetch.
+ * keeps the matching `profiles` row (username, is_pro, stripe_customer_id,
+ * onboarding_dismissed) in sync so components can read plan/onboarding
+ * status without a second fetch.
  *
  * A `profiles` row is created automatically by the `on_auth_user_created`
  * trigger in supabase/schema.sql the moment a user first confirms sign-in.
@@ -24,7 +25,7 @@ export function useAuth() {
     }
     const { data, error: profileError } = await supabase
       .from('profiles')
-      .select('id, username, is_pro, stripe_customer_id, created_at')
+      .select('id, username, is_pro, stripe_customer_id, created_at, onboarding_dismissed')
       .eq('id', userId)
       .maybeSingle();
 
