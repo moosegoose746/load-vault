@@ -144,7 +144,7 @@ export default function PublicRecipePage({ recipeId }) {
           )}
 
           <div className="mb-4 flex items-center gap-4">
-            <MoaBadge moa={recipe.groupSizeMoa} />
+            <MoaBadge moa={recipe.groupSizeMoa} distanceYards={recipe.distanceYards} />
             <div className="grid flex-1 grid-cols-2 gap-2 font-mono text-xs">
               <div className="rounded border border-slate-800 bg-slate-900/60 p-2 text-center">
                 <div className="text-slate-100">{recipe.avgVelocity ?? '—'}</div>

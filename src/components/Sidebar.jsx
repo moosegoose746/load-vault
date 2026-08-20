@@ -199,6 +199,7 @@ export default function Sidebar({
   onRecipeUpdated,
   onViewArchived,
   liveMoa,
+  liveDistanceYards,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -210,12 +211,15 @@ export default function Sidebar({
 
   // Prefer the live reading from shots currently being plotted on the
   // target; fall back to whatever MOA was saved on the recipe's last range
-  // session once nothing is actively being measured.
+  // session once nothing is actively being measured. Distance follows the
+  // same live-or-saved pairing — a bare MOA number is meaningless without
+  // knowing what distance it was measured at (see MoaBadge.jsx).
   const displayMoa = liveMoa ?? recipe.groupSizeMoa;
+  const displayDistanceYards = liveMoa != null ? liveDistanceYards : recipe.distanceYards;
 
   return (
     <aside className="flex w-full flex-col gap-6 border-slate-800 p-4 sm:w-72 sm:border-r">
-      <MoaBadge moa={displayMoa} />
+      <MoaBadge moa={displayMoa} distanceYards={displayDistanceYards} />
 
       <div className="flex flex-col gap-3">
         <h2 className="font-mono text-xs uppercase tracking-widest text-amber-400">My Recipes</h2>

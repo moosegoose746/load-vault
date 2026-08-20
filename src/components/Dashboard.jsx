@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Beaker, Boxes, ChevronRight, Crosshair, Save, Share2, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Beaker, Boxes, ChevronRight, Crosshair, Info, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import VelocityLog from './VelocityLog.jsx';
 import FirearmSummaryCard from './FirearmSummaryCard.jsx';
@@ -222,12 +222,14 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
 
   const isRealRecipe = Boolean(activeRecipeId);
 
-  // Report the live MOA reading up to App.jsx as shots are plotted, so the
-  // Sidebar's MOA badge updates in real time instead of only reflecting
-  // whatever was saved on the recipe's last range session.
+  // Report the live MOA reading (and the distance it was measured at — a
+  // bare MOA number means nothing without knowing that, same reasoning as
+  // MoaBadge.jsx) up to App.jsx as shots are plotted, so the Sidebar's MOA
+  // badge updates in real time instead of only reflecting whatever was
+  // saved on the recipe's last range session.
   useEffect(() => {
-    onTargetChange?.(target.moa);
-  }, [target.moa, onTargetChange]);
+    onTargetChange?.(target.moa, sessionDistanceYards);
+  }, [target.moa, sessionDistanceYards, onTargetChange]);
 
   // Same idea for velocity: while a chrono file is imported or shots are
   // typed in manually this session, the HUD cards and Velocity Log should
@@ -515,7 +517,13 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
         <h1 className="font-mono text-lg font-bold text-slate-100">
           RECIPE DETAIL: {recipe.title}
         </h1>
-        <p className="text-xs text-slate-400">Target {recipe.distanceYards}YD</p>
+        {!isRealRecipe && (
+          <p className="mt-1 flex items-center gap-1.5 rounded border border-amber-600 bg-amber-500/10 px-3 py-2 font-mono text-xs text-amber-300">
+            <Info size={13} className="shrink-0" />
+            DEMO RECIPE — sample data to explore the app. Create your own from the Sidebar to
+            start tracking real loads.
+          </p>
+        )}
       </div>
 
       <div className="mb-4 flex gap-2 border-b border-slate-800">
@@ -705,12 +713,6 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
             </div>
           )}
 
-          {!isRealRecipe && (
-            <p className="rounded border border-slate-800 bg-panel px-4 py-3 font-mono text-xs text-slate-500">
-              This is the built-in demo recipe — Loading Session tracking only applies to your own
-              saved recipes. Create one from the Sidebar to try it out.
-            </p>
-          )}
         </div>
 
       {isRealRecipe && (
