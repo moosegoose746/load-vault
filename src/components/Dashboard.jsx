@@ -427,6 +427,7 @@ export default function Dashboard({ recipe, activeRecipeId, authUser, onSessionS
           stdDevFps: stats?.sd ?? null,
           extremeSpread: stats?.es ?? null,
           shots: chronoShots ?? [],
+          shotCoordinates: target.shots ?? [],
           imageBlob: target.imageBlob,
           roundsFired: Number.isFinite(roundsFiredNum) && roundsFiredNum >= 0 ? roundsFiredNum : null,
           firearmId: firearmId || null,

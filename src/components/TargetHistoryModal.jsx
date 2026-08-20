@@ -1,5 +1,27 @@
 import { X } from 'lucide-react';
 
+/** Small amber dot for each plotted shot, positioned with the same
+ * normalized {x, y} fractions (0-1 of the square target photo) that
+ * TargetCalculator.jsx captured them with — plain percentage-based
+ * absolute positioning is enough here since these are just being
+ * redisplayed, not clicked/edited. Sessions saved before
+ * schema_shot_coordinates.sql have no coordinates and simply render no
+ * dots, same as any other "unset reads as unknown" field in this app. */
+function ShotDots({ coordinates }) {
+  if (!coordinates || !coordinates.length) return null;
+  return (
+    <>
+      {coordinates.map((shot, i) => (
+        <span
+          key={i}
+          className="absolute h-[5px] w-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-400 ring-1 ring-slate-950"
+          style={{ left: `${shot.x * 100}%`, top: `${shot.y * 100}%` }}
+        />
+      ))}
+    </>
+  );
+}
+
 /** Scrollable target history popup — every Range Session for a recipe
  * that has a saved target photo, newest first, each with its full
  * per-session context (date, distance, group size, velocity stats,
@@ -36,11 +58,17 @@ export default function TargetHistoryModal({ open, onClose, history, loading, fi
                 const firearmName = s.firearm_id ? firearmsById?.[s.firearm_id]?.name : null;
                 return (
                   <div key={s.id} className="flex gap-3 rounded border border-slate-800 bg-slate-900/60 p-3">
-                    <img
-                      src={s.target_image_url}
-                      alt="Target"
-                      className="h-28 w-28 shrink-0 rounded border border-slate-700 object-cover"
-                    />
+                    {/* object-fill (stretch), not object-cover — shot
+                        coordinates were captured as x/y fractions of a
+                        square canvas the photo was drawn stretched into
+                        (see TargetCalculator.jsx), so the dots below only
+                        land on the real shot holes if this square preview
+                        stretches the photo the same way instead of
+                        cropping it. */}
+                    <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded border border-slate-700">
+                      <img src={s.target_image_url} alt="Target" className="h-full w-full object-fill" />
+                      <ShotDots coordinates={s.shot_coordinates} />
+                    </div>
                     <div className="min-w-0 flex-1 text-xs">
                       <div className="flex items-baseline justify-between gap-2">
                         <span className="font-mono text-sm font-semibold text-slate-100">

@@ -302,16 +302,19 @@ export async function fetchVelocityTrend(recipeId) {
 /** Every Range Session for this recipe that has a saved target photo,
  * newest first, with the full per-session context (distance, group size,
  * velocity stats, rounds fired, which firearm) — powers the Overview
- * tab's target history popup (see TargetHistoryModal.jsx). Fetched lazily
- * on open, same reasoning as fetchVelocityTrend above: fetchRecipeDetail
- * only ever pulls the single latest session, so a full photo history
- * needs its own query rather than bloating every recipe load with data
- * most views never show. */
+ * tab's target history popup (see TargetHistoryModal.jsx). Includes
+ * `shot_coordinates` (the plotted {x, y} points, if this session has any
+ * — see schema_shot_coordinates.sql) so the popup can redraw the actual
+ * shot holes on top of the photo, not just show the final group size.
+ * Fetched lazily on open, same reasoning as fetchVelocityTrend above:
+ * fetchRecipeDetail only ever pulls the single latest session, so a full
+ * photo history needs its own query rather than bloating every recipe
+ * load with data most views never show. */
 export async function fetchTargetHistory(recipeId) {
   const { data, error } = await supabase
     .from('range_sessions')
     .select(
-      'id, target_image_url, created_at, distance_yards, group_size_moa, group_size_inches, avg_velocity_fps, std_dev_fps, extreme_spread_fps, rounds_fired, firearm_id'
+      'id, target_image_url, shot_coordinates, created_at, distance_yards, group_size_moa, group_size_inches, avg_velocity_fps, std_dev_fps, extreme_spread_fps, rounds_fired, firearm_id'
     )
     .eq('recipe_id', recipeId)
     .not('target_image_url', 'is', null)
@@ -834,14 +837,19 @@ async function uploadTargetImage(blob, userId) {
  * provided, + a target photo upload if a *newly uploaded* image is passed —
  * `imageBlob` is only set when the user picked a new photo this session; a
  * photo restored from a previous session isn't re-uploaded, see
- * TargetCalculator.jsx). `roundsFired` — how many rounds were actually
- * shot today, separate from how many got a chrono reading — is persisted
- * so it can draw down `roundsOnHand` (see fetchRoundsOnHand above); unlike
- * the old behavior, saving a range session no longer deducts raw
- * component stock on its own (see supabase/schema_batches.sql).
- * `firearmId` — which firearm profile this session's rounds were fired
- * through, optional — is what actually drives a firearm's tracked round
- * count/barrel life (see lib/firearms.js); it's a per-session choice, not
+ * TargetCalculator.jsx). Note `shots` here is chrono VELOCITY readings
+ * (fps, one per shot_logs row) — a completely different thing from
+ * `shotCoordinates`, the {x, y} points plotted on the target photo itself
+ * (see TargetCalculator.jsx's `shots` state, which is coordinates — this
+ * function just uses a different name to keep the two apart). `roundsFired`
+ * — how many rounds were actually shot today, separate from how many got a
+ * chrono reading — is persisted so it can draw down `roundsOnHand` (see
+ * fetchRoundsOnHand above); unlike the old behavior, saving a range session
+ * no longer deducts raw component stock on its own (see
+ * supabase/schema_batches.sql). `firearmId` — which firearm profile this
+ * session's rounds were fired through, optional — is what actually drives
+ * a firearm's tracked round count/barrel life (see lib/firearms.js); it's
+ * a per-session choice, not
  * inherited from the recipe. */
 export async function createRangeSession({
   recipeId,
@@ -853,6 +861,7 @@ export async function createRangeSession({
   stdDevFps,
   extremeSpread,
   shots,
+  shotCoordinates,
   imageBlob,
   roundsFired,
   firearmId,
@@ -880,6 +889,7 @@ export async function createRangeSession({
       std_dev_fps: stdDevFps,
       extreme_spread_fps: extremeSpread,
       target_image_url: targetImageUrl,
+      shot_coordinates: shotCoordinates && shotCoordinates.length ? shotCoordinates : null,
       rounds_fired: roundsFired ?? null,
       firearm_id: firearmId || null,
     })
