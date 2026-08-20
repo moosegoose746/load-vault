@@ -109,8 +109,14 @@ function WorkupFormModal({ open, onClose, onCreated, authUser }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded border border-slate-800 bg-panel p-5">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded border border-slate-800 bg-panel p-5"
+      >
         <div className="flex items-center justify-between">
           <h2 className="font-mono text-sm uppercase tracking-widest text-amber-400">New Load Workup</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-100" aria-label="Close">
@@ -725,8 +731,14 @@ function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
     : '';
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded border border-amber-500 bg-panel p-5 shadow-[0_0_24px_rgba(245,158,11,0.25)]">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded border border-amber-500 bg-panel p-5 shadow-[0_0_24px_rgba(245,158,11,0.25)]"
+      >
         <div className="flex items-start justify-between">
           <div>
             <h2 className="font-mono text-lg font-bold text-amber-400">{workup?.title ?? 'Workup'}</h2>
