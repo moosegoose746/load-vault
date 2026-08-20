@@ -212,3 +212,62 @@ export async function linkRungToRecipe(rungId, recipeId) {
   const { error } = await supabase.from('workup_rungs').update({ recipe_id: recipeId }).eq('id', rungId);
   if (error) throw error;
 }
+
+/** The mirror image of fetchMatchingWorkup — given a Workup's fixed
+ * family (caliber/powder/bullet/primer/brass), find every one of this
+ * user's own recipes that shares that exact family, regardless of
+ * charge weight. Powers "Import from Recipe" on the Workup detail view:
+ * these are the only recipes offered as import candidates, so an
+ * accidental import from a totally unrelated load isn't possible. Same
+ * null-for-null matching rule as fetchMatchingWorkup (a recipe missing a
+ * bullet only matches a Workup that's ALSO missing one). Archived
+ * recipes are excluded — nothing to import from a recipe the user
+ * already deleted. Returns `{ id, title, chargeGrains }[]`, newest
+ * first. */
+export async function fetchImportCandidateRecipes(userId, { caliberId, powderId, bulletId, primerId, brassId }) {
+  if (!userId || !caliberId) return [];
+
+  let query = supabase
+    .from('load_recipes')
+    .select('id, title, charge_weight_grains')
+    .eq('user_id', userId)
+    .eq('caliber_id', caliberId)
+    .eq('is_archived', false);
+  query = powderId ? query.eq('powder_id', powderId) : query.is('powder_id', null);
+  query = bulletId ? query.eq('bullet_id', bulletId) : query.is('bullet_id', null);
+  query = primerId ? query.eq('primer_id', primerId) : query.is('primer_id', null);
+  query = brassId ? query.eq('brass_id', brassId) : query.is('brass_id', null);
+
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map((r) => ({ id: r.id, title: r.title, chargeGrains: r.charge_weight_grains }));
+}
+
+/** A candidate recipe's Range Sessions, newest first, with enough detail
+ * (including raw shots) to preview and confirm as a Workup rung without
+ * a second round trip — see the "Import from Recipe" flow in
+ * WorkupsPage.jsx. Recipes with zero Range Sessions logged simply return
+ * an empty array (nothing to import yet, not an error). */
+export async function fetchRecipeRangeSessionsForImport(recipeId) {
+  const { data, error } = await supabase
+    .from('range_sessions')
+    .select(
+      'id, created_at, avg_velocity_fps, std_dev_fps, extreme_spread_fps, group_size_moa, rounds_fired, shot_logs ( shot_number, velocity_fps )'
+    )
+    .eq('recipe_id', recipeId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map((s) => ({
+    id: s.id,
+    createdAt: s.created_at,
+    avgVelocity: s.avg_velocity_fps,
+    stdDevFps: s.std_dev_fps,
+    extremeSpread: s.extreme_spread_fps,
+    groupSizeMoa: s.group_size_moa,
+    roundsFired: s.rounds_fired,
+    shots: (s.shot_logs || [])
+      .slice()
+      .sort((a, b) => a.shot_number - b.shot_number)
+      .map((sh) => sh.velocity_fps),
+  }));
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Beaker, Plus, Trash2, X } from 'lucide-react';
+import { Beaker, Download, Plus, Trash2, X } from 'lucide-react';
 import InfoTooltip from './InfoTooltip.jsx';
 import WorkupChart from './WorkupChart.jsx';
 import {
@@ -7,8 +7,11 @@ import {
   createWorkup,
   deleteWorkup,
   deleteWorkupRung,
+  fetchImportCandidateRecipes,
+  fetchRecipeRangeSessionsForImport,
   fetchUserWorkups,
   fetchWorkupDetail,
+  linkRungToRecipe,
 } from '../lib/workups.js';
 import { fetchCalibers, fetchComponentsByType } from '../lib/recipes.js';
 
@@ -345,6 +348,320 @@ function AddRungForm({ workupId, onAdded }) {
   );
 }
 
+/** Import a rung's data straight from a real Recipe + one of its logged
+ * Range Sessions, instead of retyping shot/velocity data that's already
+ * sitting in the database — the whole point being to eliminate the
+ * "manual entry might not match the actual range-day data" risk the
+ * user flagged. Three decisions shape this (see the discussion before
+ * building): candidate recipes are STRICTLY limited to ones matching
+ * this Workup's exact family (fetchImportCandidateRecipes mirrors
+ * fetchMatchingWorkup in the other direction) so an unrelated load can't
+ * get imported by accident; if a recipe has more than one Range Session
+ * logged, the user picks which one rather than silently grabbing the
+ * latest; and the pulled-in values land in an editable preview (the same
+ * fields/inputs AddRungForm uses) rather than committing sight-unseen,
+ * so a bad shot or a typo on the source session can still be caught
+ * before it becomes a permanent rung. Confirming both adds the rung AND
+ * links it back to its source recipe (linkRungToRecipe) — an imported
+ * rung arrives already "graduated," which a manually-typed one doesn't
+ * get unless someone links it separately later. */
+function ImportRungForm({ workup, userId, onAdded }) {
+  const [candidates, setCandidates] = useState(null);
+  const [candidatesError, setCandidatesError] = useState('');
+  const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [sessions, setSessions] = useState(null);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchImportCandidateRecipes(userId, {
+      caliberId: workup.caliberId,
+      powderId: workup.powderId,
+      bulletId: workup.bulletId,
+      primerId: workup.primerId,
+      brassId: workup.brassId,
+    })
+      .then(setCandidates)
+      .catch((err) => setCandidatesError(err.message || 'Failed to load recipes to import from.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, workup.caliberId, workup.powderId, workup.bulletId, workup.primerId, workup.brassId]);
+
+  // Recipe ids already linked to a rung on THIS Workup — shown as an
+  // "already imported" hint on their chip so re-importing the same
+  // recipe is a deliberate choice (e.g. a corrected range session),
+  // not an accidental duplicate rung.
+  const importedRecipeIds = useMemo(
+    () => new Set(workup.rungs.map((r) => r.recipeId).filter(Boolean)),
+    [workup.rungs]
+  );
+
+  const parsedShots = useMemo(() => (preview ? parseShotString(preview.shots) : []), [preview]);
+
+  const applySession = (recipe, session) => {
+    setSelectedSessionId(session.id);
+    setPreview({
+      chargeGrains: String(recipe.chargeGrains),
+      shots: session.shots.length ? session.shots.join(', ') : '',
+      avgVelocity: session.avgVelocity != null ? String(session.avgVelocity) : '',
+      stdDevFps: session.stdDevFps != null ? String(session.stdDevFps) : '',
+      extremeSpread: session.extremeSpread != null ? String(session.extremeSpread) : '',
+      groupSizeMoa: session.groupSizeMoa != null ? String(session.groupSizeMoa) : '',
+      roundsFired: session.roundsFired != null ? String(session.roundsFired) : '',
+      notes: '',
+    });
+  };
+
+  const handlePickRecipe = (recipe) => {
+    setSelectedRecipe(recipe);
+    setSessions(null);
+    setSelectedSessionId(null);
+    setPreview(null);
+    setError('');
+    setLoadingSessions(true);
+    fetchRecipeRangeSessionsForImport(recipe.id)
+      .then((list) => {
+        setSessions(list);
+        if (list.length === 1) applySession(recipe, list[0]);
+      })
+      .catch((err) => setError(err.message || 'Failed to load that recipe’s Range Sessions.'))
+      .finally(() => setLoadingSessions(false));
+  };
+
+  const handleBack = () => {
+    setSelectedRecipe(null);
+    setSessions(null);
+    setSelectedSessionId(null);
+    setPreview(null);
+    setError('');
+  };
+
+  const updatePreview = (key) => (e) => setPreview((prev) => ({ ...prev, [key]: e.target.value }));
+
+  const handleConfirm = async (e) => {
+    e.preventDefault();
+    const chargeGrains = Number.parseFloat(preview.chargeGrains);
+    if (!Number.isFinite(chargeGrains) || chargeGrains <= 0) {
+      setError('Enter a valid charge weight.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      const rung = await addWorkupRung(workup.id, {
+        chargeGrains,
+        shots: parsedShots.length ? parsedShots : null,
+        avgVelocity: preview.avgVelocity ? Number.parseFloat(preview.avgVelocity) : null,
+        stdDevFps: preview.stdDevFps ? Number.parseFloat(preview.stdDevFps) : null,
+        extremeSpread: preview.extremeSpread ? Number.parseFloat(preview.extremeSpread) : null,
+        groupSizeMoa: preview.groupSizeMoa ? Number.parseFloat(preview.groupSizeMoa) : null,
+        roundsFired: preview.roundsFired ? Number.parseInt(preview.roundsFired, 10) : null,
+        notes: preview.notes,
+      });
+      await linkRungToRecipe(rung.id, selectedRecipe.id);
+      handleBack();
+      onAdded();
+    } catch (err) {
+      setError(err.message || 'Failed to import rung.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (candidatesError) {
+    return <p className="font-mono text-xs text-red-400">{candidatesError}</p>;
+  }
+
+  if (candidates === null) {
+    return <p className="font-mono text-xs text-slate-400">Loading recipes to import from…</p>;
+  }
+
+  if (candidates.length === 0) {
+    return (
+      <p className="rounded border border-dashed border-slate-700 bg-slate-900/40 px-3 py-4 text-center font-mono text-xs text-slate-500">
+        No other saved recipes match this Workup's exact caliber/powder/bullet/primer/brass yet — once
+        you save one at a charge weight you tested, it'll show up here to import from.
+      </p>
+    );
+  }
+
+  // Step 1: pick a candidate recipe.
+  if (!selectedRecipe) {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="font-mono text-[11px] text-slate-500">
+          Pick a recipe that matches this Workup's family — its charge weight and logged Range Session
+          data will pre-fill a new rung.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {candidates.map((recipe) => (
+            <button
+              key={recipe.id}
+              type="button"
+              onClick={() => handlePickRecipe(recipe)}
+              className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900/60 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
+            >
+              {recipe.title}
+              <span className="text-slate-500">— {recipe.chargeGrains}gr</span>
+              {importedRecipeIds.has(recipe.id) && (
+                <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                  already imported
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Step 2: pick which Range Session (only shown when there's more than
+  // one — a single session auto-advances straight to the preview).
+  if (!preview) {
+    return (
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="self-start font-mono text-[11px] text-slate-500 hover:text-amber-400"
+        >
+          ← back to recipes
+        </button>
+        {loadingSessions && <p className="font-mono text-xs text-slate-400">Loading Range Sessions…</p>}
+        {!loadingSessions && sessions && sessions.length === 0 && (
+          <p className="rounded border border-dashed border-slate-700 bg-slate-900/40 px-3 py-4 text-center font-mono text-xs text-slate-500">
+            {selectedRecipe.title} has no Range Sessions logged yet — nothing to import from until one is.
+          </p>
+        )}
+        {!loadingSessions && sessions && sessions.length > 1 && (
+          <>
+            <p className="font-mono text-[11px] text-slate-500">
+              {selectedRecipe.title} has {sessions.length} Range Sessions logged — pick which one to import.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {sessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => applySession(selectedRecipe, session)}
+                  className={`flex items-center justify-between rounded border px-3 py-1.5 text-left font-mono text-xs ${
+                    selectedSessionId === session.id
+                      ? 'border-amber-500 text-amber-400'
+                      : 'border-slate-700 text-slate-300 hover:border-amber-500/60'
+                  }`}
+                >
+                  <span>{new Date(session.createdAt).toLocaleDateString()}</span>
+                  <span className="text-slate-500">
+                    {session.avgVelocity != null ? `${session.avgVelocity} fps avg` : 'no chrono data'}
+                    {session.roundsFired != null ? ` · ${session.roundsFired} rds` : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // Step 3: editable preview, pre-filled from the chosen session.
+  return (
+    <form onSubmit={handleConfirm} className="flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={handleBack}
+        className="self-start font-mono text-[11px] text-slate-500 hover:text-amber-400"
+      >
+        ← back to recipes
+      </button>
+      <p className="font-mono text-[11px] text-slate-500">
+        Importing from <span className="text-slate-300">{selectedRecipe.title}</span> — review before
+        confirming, everything below is editable.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Field label="Charge Weight (gr)">
+          <input
+            required
+            type="number"
+            step="0.1"
+            min="0"
+            value={preview.chargeGrains}
+            onChange={updatePreview('chargeGrains')}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Group (MOA)">
+          <input type="number" step="0.01" min="0" value={preview.groupSizeMoa} onChange={updatePreview('groupSizeMoa')} className={inputClass} />
+        </Field>
+        <Field label="Rounds Fired">
+          <input type="number" step="1" min="1" value={preview.roundsFired} onChange={updatePreview('roundsFired')} className={inputClass} />
+        </Field>
+      </div>
+
+      <Field label="Shots (fps, comma/space separated — auto-computes Avg/SD/ES below)">
+        <textarea value={preview.shots} onChange={updatePreview('shots')} rows={2} className={inputClass} />
+        {parsedShots.length > 0 && (
+          <span className="font-mono text-[10px] text-emerald-400">{parsedShots.length} shots parsed</span>
+        )}
+      </Field>
+
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Avg FPS (if no shots above)">
+          <input
+            type="number"
+            step="1"
+            min="0"
+            value={preview.avgVelocity}
+            onChange={updatePreview('avgVelocity')}
+            disabled={parsedShots.length > 0}
+            className={`${inputClass} disabled:opacity-40`}
+          />
+        </Field>
+        <Field label="SD">
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            value={preview.stdDevFps}
+            onChange={updatePreview('stdDevFps')}
+            disabled={parsedShots.length > 0}
+            className={`${inputClass} disabled:opacity-40`}
+          />
+        </Field>
+        <Field label="ES">
+          <input
+            type="number"
+            step="1"
+            min="0"
+            value={preview.extremeSpread}
+            onChange={updatePreview('extremeSpread')}
+            disabled={parsedShots.length > 0}
+            className={`${inputClass} disabled:opacity-40`}
+          />
+        </Field>
+      </div>
+
+      <Field label="Notes (optional)">
+        <input type="text" value={preview.notes} onChange={updatePreview('notes')} className={inputClass} placeholder="e.g. imported from range day 8/12" />
+      </Field>
+
+      {error && <p className="font-mono text-xs text-red-400">{error}</p>}
+
+      <button
+        type="submit"
+        disabled={submitting}
+        className="self-start flex items-center gap-1.5 rounded border border-amber-500 px-3 py-1.5 font-mono text-xs text-amber-400 hover:bg-amber-500/10 disabled:opacity-40"
+      >
+        <Download size={13} />
+        {submitting ? 'IMPORTING…' : 'CONFIRM IMPORT'}
+      </button>
+    </form>
+  );
+}
+
 // A right-aligned, tabular-figure numeric cell — reserved for columns of
 // numbers that need to line up vertically (per the dataviz skill), unlike
 // a standalone value elsewhere in the app.
@@ -352,11 +669,16 @@ function NumCell({ children }) {
   return <td className="px-2 py-1.5 text-right font-mono text-xs text-slate-200" style={{ fontVariantNumeric: 'tabular-nums' }}>{children}</td>;
 }
 
-function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
+function WorkupDetailModal({ open, workupId, authUser, onClose, onDeleted }) {
   const [workup, setWorkup] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Manual typing vs. pulling data straight from a matching recipe's
+  // Range Session — see ImportRungForm's doc comment for the full
+  // reasoning. Defaults to Manual so existing muscle memory doesn't
+  // change for anyone who hasn't used Import yet.
+  const [addMode, setAddMode] = useState('manual'); // 'manual' | 'import'
 
   const reload = () => {
     if (!workupId) return;
@@ -372,6 +694,7 @@ function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
     setWorkup(null);
     setError('');
     setConfirmingDelete(false);
+    setAddMode('manual');
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workupId]);
@@ -495,7 +818,34 @@ function WorkupDetailModal({ open, workupId, onClose, onDeleted }) {
               )}
             </div>
 
-            <AddRungForm workupId={workup.id} onAdded={reload} />
+            <div>
+              <div className="mb-2 flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setAddMode('manual')}
+                  className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
+                    addMode === 'manual' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Manual Entry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddMode('import')}
+                  className={`flex items-center gap-1 rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
+                    addMode === 'import' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <Download size={11} />
+                  Import from Recipe
+                </button>
+              </div>
+              {addMode === 'manual' ? (
+                <AddRungForm workupId={workup.id} onAdded={reload} />
+              ) : (
+                <ImportRungForm workup={workup} userId={authUser?.id} onAdded={reload} />
+              )}
+            </div>
 
             <div className="mt-1 flex items-center gap-2 border-t border-slate-800 pt-3">
               {confirmingDelete ? (
@@ -655,6 +1005,7 @@ export default function WorkupsPage({ authUser, initialOpenWorkupId, onInitialWo
       <WorkupDetailModal
         open={!!openWorkupId}
         workupId={openWorkupId}
+        authUser={authUser}
         onClose={() => setOpenWorkupId(null)}
         onDeleted={reloadList}
       />
