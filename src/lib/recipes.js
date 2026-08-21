@@ -36,6 +36,19 @@ export async function fetchComponentsByType(type) {
  * from range_sessions) rather than one big join, since Supabase's
  * embedded-resource syntax can't express "aggregate MIN() per recipe" —
  * the aggregation happens here in JS instead. */
+// Loadable From Stock below this many rounds is flagged as "running low"
+// on a recipe's card — a simple, fixed heuristic (roughly one more box's
+// worth) rather than anything per-component-configurable. Good enough to
+// catch "you're about to run out of primers for this load" at a glance;
+// not meant to replace the real per-lot detail Inventory already shows.
+const LOW_STOCK_ROUNDS_THRESHOLD = 20;
+
+// A "last tested" date older than this many days gets a staleness warning
+// on the card (see RecipesHomePage.jsx) — barrel wear, a new powder lot,
+// or just a season of temperature swings can all move a load's real
+// performance away from what an old measured group still shows.
+export const STALE_TEST_DAYS = 90;
+
 export async function fetchUserRecipes(userId) {
   const [recipesRes, sessionsRes, batchesRes, inventoryMap] = await Promise.all([
     supabase
@@ -54,7 +67,15 @@ export async function fetchUserRecipes(userId) {
       .eq('user_id', userId)
       .eq('is_archived', false)
       .order('created_at', { ascending: false }),
-    supabase.from('range_sessions').select('recipe_id, group_size_moa, created_at, rounds_fired').eq('user_id', userId),
+    // avg_velocity_fps added alongside group_size_moa so "was the most
+    // recent range trip actually measured, or just a Quick Log" (see
+    // lastFiredWasQuickLog below) can be answered the same way
+    // fetchRecipeDetail's measuredSession already does — either field
+    // counts as "measured," not just group_size_moa alone.
+    supabase
+      .from('range_sessions')
+      .select('recipe_id, group_size_moa, avg_velocity_fps, created_at, rounds_fired')
+      .eq('user_id', userId),
     // Recipes Home (see the progress log) wants a "last worked on" date and
     // a lifetime rounds-loaded count per card — bench sessions count
     // toward "last worked on" just as much as range days, and rounds_loaded
@@ -80,7 +101,18 @@ export async function fetchUserRecipes(userId) {
   // fetchRecipeDetail's measuredSession draws, applied here for the card
   // grid's own "Most Recent MOA" stat.
   const recentMoaByRecipe = {};
-  const recentMoaAtByRecipe = {};
+  // Date of that same most-recent-MEASURED session (moa OR velocity, same
+  // "hasData" test lastFiredWasQuickLog uses below) — powers the card's
+  // "Last tested" line, which can legitimately be an older date than
+  // lastFiredAt if the most recent trip(s) were Quick Logs.
+  const lastMeasuredAtByRecipe = {};
+  // True most-recent range session per recipe, regardless of whether it
+  // has any measured data — a Quick Log trip is still a real, most-recent
+  // range day. Powers lastFiredAt/lastFiredWasQuickLog below, same
+  // distinction fetchRecipeDetail's latestSession vs. measuredSession
+  // draws (see the Range Day overhaul follow-up in the progress log).
+  const lastFiredAtByRecipe = {};
+  const lastFiredHasDataByRecipe = {};
   const lastActivityByRecipe = {};
   const totalRoundsLoadedByRecipe = {};
   const totalRoundsFiredByRecipe = {};
@@ -91,14 +123,21 @@ export async function fetchUserRecipes(userId) {
     }
   };
   for (const s of sessionsRes.data || []) {
+    const hasData = s.group_size_moa != null || s.avg_velocity_fps != null;
     if (s.group_size_moa != null) {
       if (bestMoaByRecipe[s.recipe_id] == null || s.group_size_moa < bestMoaByRecipe[s.recipe_id]) {
         bestMoaByRecipe[s.recipe_id] = s.group_size_moa;
       }
-      if (!recentMoaAtByRecipe[s.recipe_id] || s.created_at > recentMoaAtByRecipe[s.recipe_id]) {
-        recentMoaAtByRecipe[s.recipe_id] = s.created_at;
-        recentMoaByRecipe[s.recipe_id] = s.group_size_moa;
+    }
+    if (hasData) {
+      if (!lastMeasuredAtByRecipe[s.recipe_id] || s.created_at > lastMeasuredAtByRecipe[s.recipe_id]) {
+        lastMeasuredAtByRecipe[s.recipe_id] = s.created_at;
+        recentMoaByRecipe[s.recipe_id] = s.group_size_moa ?? null;
       }
+    }
+    if (!lastFiredAtByRecipe[s.recipe_id] || s.created_at > lastFiredAtByRecipe[s.recipe_id]) {
+      lastFiredAtByRecipe[s.recipe_id] = s.created_at;
+      lastFiredHasDataByRecipe[s.recipe_id] = hasData;
     }
     totalRoundsFiredByRecipe[s.recipe_id] = (totalRoundsFiredByRecipe[s.recipe_id] ?? 0) + (s.rounds_fired || 0);
     noteActivity(s.recipe_id, s.created_at);
@@ -117,13 +156,21 @@ export async function fetchUserRecipes(userId) {
     // function expects, just fetched in bulk instead of one at a time.
     const costPerRound = calculateCostPerRound(row, inventoryMap);
     const totalRoundsLoaded = totalRoundsLoadedByRecipe[row.id] ?? 0;
+    const totalRoundsFired = totalRoundsFiredByRecipe[row.id] ?? 0;
     const factoryPricePerRound = row.factory_price_per_round ?? null;
+    // Same raw-materials capacity estimate calculateCostPerRound's
+    // sibling function already provides for the single-recipe Dashboard
+    // view — cheap to call per row here too (pure JS over the already-
+    // fetched inventoryMap, no extra query) and is what powers the card
+    // grid's low-stock warning below.
+    const { loadableFromStock, loadableBottleneck } = calculateLoadableFromStock(row, inventoryMap);
     return {
       id: row.id,
       title: row.title,
       created_at: row.created_at,
       caliber: row.calibers?.name ?? null,
       firearm: row.firearm?.name ?? null,
+      chargeGrains: row.charge_weight_grains ?? null,
       powder: componentLabel(row.powder),
       bullet: componentLabel(row.bullet),
       primer: componentLabel(row.primer),
@@ -145,12 +192,29 @@ export async function fetchUserRecipes(userId) {
       // totals row (see RecipesHomePage.jsx) sums these across every
       // recipe rather than issuing a separate aggregate query.
       totalRoundsLoaded,
-      totalRoundsFired: totalRoundsFiredByRecipe[row.id] ?? 0,
+      totalRoundsFired,
+      // Currently loaded & sitting ready to shoot — same
+      // rounds-loaded-minus-rounds-fired math fetchRoundsOnHand does for a
+      // single recipe, computed here from the totals already aggregated
+      // above instead of a third per-recipe query.
+      roundsOnHand: Math.max(0, totalRoundsLoaded - totalRoundsFired),
+      loadableFromStock,
+      loadableBottleneck,
+      lowStock: loadableFromStock != null && loadableFromStock < LOW_STOCK_ROUNDS_THRESHOLD,
       // Most recent Loading Session or Range Session logged for this recipe
       // — falls back to the recipe's own created_at (nothing logged yet
       // still has a meaningful "added on" date for sorting/display) rather
       // than null, which would read as broken instead of just "brand new."
       lastActivityAt: lastActivityByRecipe[row.id] ?? row.created_at,
+      // True most-recent range trip (Quick Log included) vs. the most
+      // recent one that actually has a measured group/velocity — see the
+      // field comments above the aggregation loop. Lets the card show
+      // "last tested" honestly instead of implying a stale Quick Log trip
+      // means nothing's been measured recently, or vice versa.
+      lastFiredAt: lastFiredAtByRecipe[row.id] ?? null,
+      lastFiredWasQuickLog:
+        lastFiredAtByRecipe[row.id] != null && !lastFiredHasDataByRecipe[row.id],
+      lastMeasuredAt: lastMeasuredAtByRecipe[row.id] ?? null,
     };
   });
 }

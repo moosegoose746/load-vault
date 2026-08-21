@@ -248,9 +248,14 @@ function computeRowState(row, recipes, details, caliberMismatch) {
   return { allSame, winnerIds };
 }
 
-export default function ComparePage({ authUser }) {
+export default function ComparePage({ authUser, initialSelectedIds }) {
   const [recipeList, setRecipeList] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
+  // Pre-selected when arriving here via Recipes Home's "Compare Selected"
+  // action (see RecipesHomePage.jsx) — read once on mount, same as any
+  // other initial useState value; ComparePage is fully unmounted whenever
+  // `view` isn't 'compare' (see App.jsx), so there's no stale-prop case to
+  // guard against on a later re-render.
+  const [selectedIds, setSelectedIds] = useState(initialSelectedIds || []);
   const [details, setDetails] = useState({}); // recipeId -> detail object
   const [loadingIds, setLoadingIds] = useState([]);
   const [listError, setListError] = useState('');

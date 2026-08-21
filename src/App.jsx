@@ -114,6 +114,13 @@ function AppShell() {
   // tab's "Part of a Load Workup" card is clicked (see Dashboard.jsx),
   // consumed once by WorkupsPage then cleared.
   const [pendingWorkupId, setPendingWorkupId] = useState(null);
+  // Deep-link target for the Compare page — set when the user picks 2+
+  // cards on Recipes Home and hits "Compare Selected" (see
+  // RecipesHomePage.jsx's select mode). ComparePage reads this once as its
+  // initial selection (see its `initialSelectedIds` prop) and is fully
+  // unmounted/remounted on every view change, so there's nothing to clear
+  // here afterward the way pendingWorkupId needs to be.
+  const [compareInitialIds, setCompareInitialIds] = useState([]);
   const [userRecipes, setUserRecipes] = useState([]);
   const [activeRecipeId, setActiveRecipeId] = useState(null); // null = demo recipe
   const [activeRecipe, setActiveRecipe] = useState(mockRecipe);
@@ -380,6 +387,10 @@ function AppShell() {
             onEditRecipe={handleEditRecipe}
             onDeleteRecipe={handleDeleteRecipe}
             onViewArchived={() => setArchivedModalOpen(true)}
+            onCompareSelected={(ids) => {
+              setCompareInitialIds(ids);
+              setView('compare');
+            }}
           />
           </>
         ) : view === 'inventory' ? (
@@ -399,7 +410,7 @@ function AppShell() {
             onInitialWorkupOpened={() => setPendingWorkupId(null)}
           />
         ) : view === 'compare' ? (
-          <ComparePage authUser={auth.user} />
+          <ComparePage authUser={auth.user} initialSelectedIds={compareInitialIds} />
         ) : (
           <>
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
