@@ -188,20 +188,36 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMod
             <span className="text-slate-600">Firearm:</span> {recipe.firearm}
           </p>
         )}
-        {(recipe.chargeGrains != null || recipe.powder || recipe.bullet) && (
-          <p className="truncate text-xs text-slate-400">
-            {recipe.chargeGrains != null ? `${recipe.chargeGrains}gr ` : ''}
-            {recipe.powder || '—'}
-            <span className="text-slate-600"> · </span>
-            {recipe.bullet || '—'}
-          </p>
+        {(recipe.chargeGrains != null || recipe.powder || recipe.bullet || recipe.primer || recipe.brass) && (
+          <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-slate-400">
+            <p className="truncate">
+              <span className="text-slate-600">Powder:</span>{' '}
+              {recipe.chargeGrains != null ? `${recipe.chargeGrains}gr ` : ''}
+              {recipe.powder || '—'}
+            </p>
+            <p className="truncate">
+              <span className="text-slate-600">Bullet:</span> {recipe.bullet || '—'}
+            </p>
+            <p className="truncate">
+              <span className="text-slate-600">Primer:</span> {recipe.primer || '—'}
+            </p>
+            <p className="truncate">
+              <span className="text-slate-600">Brass:</span> {recipe.brass || '—'}
+            </p>
+          </div>
         )}
       </div>
 
       {hasAnyActivity ? (
         <>
-          <div className="grid grid-cols-3 gap-2">
+          {/* Loaded & Ready sits up here with Best MOA/Cost/Money Saved
+              rather than behind "More stats" — this is the one number a
+              reloader actually wants scannable before heading to the
+              range ("how much of this do I already have loaded"), not
+              buried with the more retrospective stats below. */}
+          <div className="grid grid-cols-2 gap-2">
             <PrimaryStat label="Best MOA" value={moaFmt(recipe.bestMoa)} />
+            <PrimaryStat label="Loaded & Ready" value={recipe.roundsOnHand || null} />
             <PrimaryStat label="Cost/Round" value={moneyFmt(recipe.costPerRound)} />
             <PrimaryStat label="Money Saved" value={moneyFmt(recipe.moneySaved)} variant="saved" />
           </div>
@@ -221,7 +237,6 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMod
           {showMore && (
             <div className="grid grid-cols-2 gap-2">
               <CardStat label="Recent MOA" value={moaFmt(recipe.recentMoa)} />
-              <CardStat label="Loaded & Ready" value={recipe.roundsOnHand || null} />
               <CardStat label="Rounds Fired" value={recipe.totalRoundsFired || null} />
               <CardStat label="Total Spent" value={moneyFmt(recipe.totalMoneySpent)} />
             </div>
