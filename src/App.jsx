@@ -391,6 +391,10 @@ function AppShell() {
               setCompareInitialIds(ids);
               setView('compare');
             }}
+            onOpenWorkup={(workupId) => {
+              setPendingWorkupId(workupId);
+              setView('workups');
+            }}
           />
           </>
         ) : view === 'inventory' ? (

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   Archive,
   AlertTriangle,
+  Beaker,
   CheckSquare,
   ChevronDown,
   ChevronUp,
@@ -16,6 +17,34 @@ import {
 import MetricCard from './MetricCard.jsx';
 import { STALE_TEST_DAYS } from '../lib/recipes.js';
 
+// Below this many rounds, a group size (Best MOA / Recent MOA) is a small
+// enough sample that it can look meaningfully better or worse than the
+// load actually is — same threshold and reasoning as ComparePage's own
+// SMALL_SAMPLE_THRESHOLD for SD/ES (see ComparePage.jsx), applied here to
+// group size instead of velocity spread.
+const SMALL_SAMPLE_THRESHOLD = 5;
+
+// The small "n=X" shot-count subtext PrimaryStat/CardStat render under a
+// group-size value — amber once below SMALL_SAMPLE_THRESHOLD, so a
+// 3-round 0.68 MOA group doesn't read with the same confidence as a
+// 10-round one just because they show the same number.
+function SampleSizeNote({ shots }) {
+  if (shots == null) return null;
+  const small = shots < SMALL_SAMPLE_THRESHOLD;
+  return (
+    <span
+      className={`font-mono text-[8px] ${small ? 'text-amber-500' : 'text-slate-600'}`}
+      title={
+        small
+          ? `Based on only ${shots} round${shots === 1 ? '' : 's'} — small sample`
+          : `Based on ${shots} rounds`
+      }
+    >
+      n={shots}
+    </span>
+  );
+}
+
 // A small label/value stat box — same visual treatment Best MOA already
 // used, pulled out since the card now shows several of these instead of
 // one. `variant="saved"` mirrors MetricCard's emerald treatment so Money
@@ -24,8 +53,9 @@ import { STALE_TEST_DAYS } from '../lib/recipes.js';
 // dim/slate instead of amber — a card with several "—" stats (a brand new
 // recipe, or one that's only ever been Quick Logged) should visually read
 // as "nothing here yet" at a glance, not compete for attention with cards
-// that actually have real numbers.
-function CardStat({ label, value, variant }) {
+// that actually have real numbers. `shots`, if given, renders as a small
+// "n=X" sample-size note under the value (see SampleSizeNote above).
+function CardStat({ label, value, variant, shots }) {
   const isSaved = variant === 'saved';
   const isEmpty = value == null;
   return (
@@ -41,23 +71,28 @@ function CardStat({ label, value, variant }) {
       >
         {label}
       </span>
-      <span
-        className={`font-mono text-sm font-semibold ${
-          isEmpty ? 'text-slate-600' : isSaved ? 'text-emerald-300' : 'text-amber-400'
-        }`}
-      >
-        {value ?? '—'}
+      <span className="flex flex-col items-end">
+        <span
+          className={`font-mono text-sm font-semibold ${
+            isEmpty ? 'text-slate-600' : isSaved ? 'text-emerald-300' : 'text-amber-400'
+          }`}
+        >
+          {value ?? '—'}
+        </span>
+        {!isEmpty && <SampleSizeNote shots={shots} />}
       </span>
     </div>
   );
 }
 
-// The card's three "headline" stats (Best MOA, Cost/Round, Money Saved) —
-// visually bigger than CardStat below since these are the ones worth
-// reading at a glance while scanning the grid; everything else (Recent
-// MOA, Loaded & Ready, Rounds Fired, Total Spent) lives behind the "More
-// stats" toggle instead of competing with these for attention.
-function PrimaryStat({ label, value, variant }) {
+// The card's four "headline" stats (Best MOA, Loaded & Ready, Cost/Round,
+// Money Saved) — visually bigger than CardStat below since these are the
+// ones worth reading at a glance while scanning the grid; everything else
+// (Recent MOA, Rounds Fired, Total Spent) lives behind the "More stats"
+// toggle instead of competing with these for attention. `shots`, if given,
+// renders a small "n=X" sample-size note under the value (see
+// SampleSizeNote above) — only meaningful for the Best MOA tile.
+function PrimaryStat({ label, value, variant, shots }) {
   const isSaved = variant === 'saved';
   const isEmpty = value == null;
   return (
@@ -73,6 +108,7 @@ function PrimaryStat({ label, value, variant }) {
       >
         {value ?? '—'}
       </span>
+      {!isEmpty && <SampleSizeNote shots={shots} />}
       <span
         className={`font-mono text-[9px] uppercase tracking-widest ${
           isSaved && !isEmpty ? 'text-emerald-400' : 'text-slate-500'
@@ -141,7 +177,17 @@ function relativeLabel(days) {
 // is from four months ago, not last week." Select mode (driven by
 // RecipesHomePage's Compare toggle) swaps the click-to-open/Edit/Delete
 // behavior for a checkbox so 2+ cards can be picked and sent to Compare.
-function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMode, selected, onToggleSelect }) {
+function RecipeCard({
+  recipe,
+  onOpen,
+  onEdit,
+  onDelete,
+  onOpenWorkup,
+  isBestOverall,
+  selectMode,
+  selected,
+  onToggleSelect,
+}) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showMore, setShowMore] = useState(false);
 
@@ -192,6 +238,27 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMod
               Low Stock
             </span>
           )}
+          {recipe.workupId && (
+            // Same family-match rule Dashboard's own "Part of a Load
+            // Workup" card uses (see fetchMatchingWorkup in
+            // lib/workups.js) — this recipe shares its exact
+            // caliber/powder/bullet/primer/brass with a saved Workup, so
+            // it's one data point in a charge-weight ladder, not an
+            // isolated load. Jumps straight to that Workup's chart, same
+            // destination Dashboard's own badge uses.
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenWorkup?.(recipe.workupId);
+              }}
+              title={`Part of the "${recipe.workupTitle}" Load Workup — click to open its chart`}
+              className="flex items-center gap-1 rounded border border-sky-700 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-sky-300 hover:bg-sky-500/20"
+            >
+              <Beaker size={10} />
+              Workup
+            </button>
+          )}
         </div>
         {recipe.caliber && (
           <span className="mb-1 inline-block rounded border border-slate-700 bg-slate-900/60 px-1.5 py-0.5 font-mono text-[10px] text-slate-300">
@@ -228,7 +295,7 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMod
               range ("how much of this do I already have loaded"), not
               buried with the more retrospective stats below. */}
           <div className="grid grid-cols-2 gap-2">
-            <PrimaryStat label="Best MOA" value={moaFmt(recipe.bestMoa)} />
+            <PrimaryStat label="Best MOA" value={moaFmt(recipe.bestMoa)} shots={recipe.bestMoaShots} />
             <PrimaryStat label="Loaded & Ready" value={recipe.roundsOnHand || null} />
             <PrimaryStat label="Cost/Round" value={moneyFmt(recipe.costPerRound)} />
             <PrimaryStat label="Money Saved" value={moneyFmt(recipe.moneySaved)} variant="saved" />
@@ -248,7 +315,7 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMod
 
           {showMore && (
             <div className="grid grid-cols-2 gap-2">
-              <CardStat label="Recent MOA" value={moaFmt(recipe.recentMoa)} />
+              <CardStat label="Recent MOA" value={moaFmt(recipe.recentMoa)} shots={recipe.recentMoaShots} />
               <CardStat label="Rounds Fired" value={recipe.totalRoundsFired || null} />
               <CardStat label="Total Spent" value={moneyFmt(recipe.totalMoneySpent)} />
             </div>
@@ -366,6 +433,7 @@ export default function RecipesHomePage({
   onDeleteRecipe,
   onViewArchived,
   onCompareSelected,
+  onOpenWorkup,
 }) {
   const [caliberFilter, setCaliberFilter] = useState('');
   const [firearmFilter, setFirearmFilter] = useState('');
@@ -664,6 +732,7 @@ export default function RecipesHomePage({
               onOpen={onSelectRecipe}
               onEdit={onEditRecipe}
               onDelete={onDeleteRecipe}
+              onOpenWorkup={onOpenWorkup}
               isBestOverall={totals.bestMoaOverall != null && recipe.bestMoa === totals.bestMoaOverall}
               selectMode={selectMode}
               selected={selectedIds.includes(recipe.id)}

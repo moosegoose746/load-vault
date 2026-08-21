@@ -49,8 +49,25 @@ const LOW_STOCK_ROUNDS_THRESHOLD = 20;
 // performance away from what an old measured group still shows.
 export const STALE_TEST_DAYS = 90;
 
+/** Whether two Workups/recipes share the exact same fixed component
+ * family — same rule fetchMatchingWorkup (see lib/workups.js) already
+ * uses for the single-recipe Overview's "Part of a Load Workup" card, just
+ * applied here in bulk (one query for every Workup, matched in JS against
+ * every recipe) instead of one query per recipe. `null` on either side
+ * only matches `null` on the other — a recipe missing a bullet only
+ * matches a Workup that's ALSO missing one, not "any bullet." */
+function sameComponentFamily(a, b) {
+  return (
+    (a.caliberId ?? null) === (b.caliberId ?? null) &&
+    (a.powderId ?? null) === (b.powderId ?? null) &&
+    (a.bulletId ?? null) === (b.bulletId ?? null) &&
+    (a.primerId ?? null) === (b.primerId ?? null) &&
+    (a.brassId ?? null) === (b.brassId ?? null)
+  );
+}
+
 export async function fetchUserRecipes(userId) {
-  const [recipesRes, sessionsRes, batchesRes, inventoryMap] = await Promise.all([
+  const [recipesRes, sessionsRes, batchesRes, inventoryMap, workupsRes] = await Promise.all([
     supabase
       .from('load_recipes')
       .select(
@@ -89,10 +106,20 @@ export async function fetchUserRecipes(userId) {
     // list at once, which is what keeps Cost/Round-derived fields on this
     // list cheap despite needing per-component pricing.
     fetchUserInventoryMap(userId),
+    // Every Workup's fixed component family (NOT its rungs — this only
+    // needs enough to answer "does any Workup share this recipe's exact
+    // caliber/powder/bullet/primer/brass," see sameComponentFamily above),
+    // one bulk query rather than fetchMatchingWorkup's one-query-per-recipe
+    // version of the same check.
+    supabase
+      .from('load_workups')
+      .select('id, title, caliber_id, powder_id, bullet_id, primer_id, brass_id')
+      .eq('user_id', userId),
   ]);
   if (recipesRes.error) throw recipesRes.error;
   if (sessionsRes.error) throw sessionsRes.error;
   if (batchesRes.error) throw batchesRes.error;
+  if (workupsRes.error) throw workupsRes.error;
 
   const bestMoaByRecipe = {};
   // Most recent MEASURED group per recipe — NOT just whichever session is
@@ -101,6 +128,14 @@ export async function fetchUserRecipes(userId) {
   // fetchRecipeDetail's measuredSession draws, applied here for the card
   // grid's own "Most Recent MOA" stat.
   const recentMoaByRecipe = {};
+  // How many rounds went into the session that produced bestMoa/recentMoa
+  // (that session's rounds_fired) — a 0.68 MOA group from 3 rounds and one
+  // from 10 rounds aren't the same claim of confidence, same "small
+  // sample" concern ComparePage already flags for SD/ES. Recipes Home
+  // surfaces this as a small "n=X" next to the number rather than hiding
+  // it — see RecipesHomePage.jsx.
+  const bestMoaShotsByRecipe = {};
+  const recentMoaShotsByRecipe = {};
   // Date of that same most-recent-MEASURED session (moa OR velocity, same
   // "hasData" test lastFiredWasQuickLog uses below) — powers the card's
   // "Last tested" line, which can legitimately be an older date than
@@ -127,12 +162,14 @@ export async function fetchUserRecipes(userId) {
     if (s.group_size_moa != null) {
       if (bestMoaByRecipe[s.recipe_id] == null || s.group_size_moa < bestMoaByRecipe[s.recipe_id]) {
         bestMoaByRecipe[s.recipe_id] = s.group_size_moa;
+        bestMoaShotsByRecipe[s.recipe_id] = s.rounds_fired ?? null;
       }
     }
     if (hasData) {
       if (!lastMeasuredAtByRecipe[s.recipe_id] || s.created_at > lastMeasuredAtByRecipe[s.recipe_id]) {
         lastMeasuredAtByRecipe[s.recipe_id] = s.created_at;
         recentMoaByRecipe[s.recipe_id] = s.group_size_moa ?? null;
+        recentMoaShotsByRecipe[s.recipe_id] = s.rounds_fired ?? null;
       }
     }
     if (!lastFiredAtByRecipe[s.recipe_id] || s.created_at > lastFiredAtByRecipe[s.recipe_id]) {
@@ -164,6 +201,32 @@ export async function fetchUserRecipes(userId) {
     // fetched inventoryMap, no extra query) and is what powers the card
     // grid's low-stock warning below.
     const { loadableFromStock, loadableBottleneck } = calculateLoadableFromStock(row, inventoryMap);
+    // Same family-match rule Dashboard's own "Part of a Load Workup" card
+    // uses (see fetchMatchingWorkup in lib/workups.js) — a Workup that
+    // fixes the exact same caliber/powder/bullet/primer/brass as this
+    // recipe, regardless of charge weight. `null` at most one Workup will
+    // ever match per recipe (a user could theoretically have two
+    // identical-family Workups, in which case this just takes whichever
+    // the bulk query returned first — same limitation fetchMatchingWorkup
+    // has via its own `.limit(1)`).
+    const matchingWorkup = (workupsRes.data || []).find((w) =>
+      sameComponentFamily(
+        {
+          caliberId: w.caliber_id,
+          powderId: w.powder_id,
+          bulletId: w.bullet_id,
+          primerId: w.primer_id,
+          brassId: w.brass_id,
+        },
+        {
+          caliberId: row.caliber_id,
+          powderId: row.powder?.id ?? null,
+          bulletId: row.bullet?.id ?? null,
+          primerId: row.primer?.id ?? null,
+          brassId: row.brass?.id ?? null,
+        }
+      )
+    );
     return {
       id: row.id,
       title: row.title,
@@ -176,11 +239,23 @@ export async function fetchUserRecipes(userId) {
       primer: componentLabel(row.primer),
       brass: componentLabel(row.brass),
       bestMoa: bestMoaByRecipe[row.id] ?? null,
+      // How many rounds that best group / most-recent group was actually
+      // shot with — see the aggregation loop above. Lets the card show a
+      // small "n=X" so a 3-round group and a 10-round group of the same
+      // MOA don't read as equally confident.
+      bestMoaShots: bestMoaShotsByRecipe[row.id] ?? null,
       // Tightest group ever (bestMoa) vs. the most recent one measured
       // (recentMoa) are genuinely different questions — "how good has
       // this load ever shot" vs. "how's it shooting lately" — so both
       // get their own card field rather than picking one.
       recentMoa: recentMoaByRecipe[row.id] ?? null,
+      recentMoaShots: recentMoaShotsByRecipe[row.id] ?? null,
+      // The single Workup (if any) that shares this recipe's exact
+      // caliber/powder/bullet/primer/brass — see matchingWorkup above.
+      // Lets the card badge straight into that ladder's chart instead of
+      // this recipe reading as an isolated, unrelated load.
+      workupId: matchingWorkup?.id ?? null,
+      workupTitle: matchingWorkup?.title ?? null,
       costPerRound,
       totalMoneySpent: costPerRound != null ? costPerRound * totalRoundsLoaded : null,
       moneySaved:
