@@ -54,7 +54,7 @@ export async function fetchUserRecipes(userId) {
       .eq('user_id', userId)
       .eq('is_archived', false)
       .order('created_at', { ascending: false }),
-    supabase.from('range_sessions').select('recipe_id, group_size_moa, created_at').eq('user_id', userId),
+    supabase.from('range_sessions').select('recipe_id, group_size_moa, created_at, rounds_fired').eq('user_id', userId),
     // Recipes Home (see the progress log) wants a "last worked on" date and
     // a lifetime rounds-loaded count per card — bench sessions count
     // toward "last worked on" just as much as range days, and rounds_loaded
@@ -83,6 +83,7 @@ export async function fetchUserRecipes(userId) {
   const recentMoaAtByRecipe = {};
   const lastActivityByRecipe = {};
   const totalRoundsLoadedByRecipe = {};
+  const totalRoundsFiredByRecipe = {};
   const noteActivity = (recipeId, createdAt) => {
     if (!createdAt) return;
     if (!lastActivityByRecipe[recipeId] || createdAt > lastActivityByRecipe[recipeId]) {
@@ -99,6 +100,7 @@ export async function fetchUserRecipes(userId) {
         recentMoaByRecipe[s.recipe_id] = s.group_size_moa;
       }
     }
+    totalRoundsFiredByRecipe[s.recipe_id] = (totalRoundsFiredByRecipe[s.recipe_id] ?? 0) + (s.rounds_fired || 0);
     noteActivity(s.recipe_id, s.created_at);
   }
   for (const b of batchesRes.data || []) {
@@ -138,6 +140,12 @@ export async function fetchUserRecipes(userId) {
         factoryPricePerRound != null && costPerRound != null
           ? (factoryPricePerRound - costPerRound) * totalRoundsLoaded
           : null,
+      // Raw counts, not just the derived dollar figures above — Recipes
+      // Home's card grid wants Rounds Fired directly, and its account-wide
+      // totals row (see RecipesHomePage.jsx) sums these across every
+      // recipe rather than issuing a separate aggregate query.
+      totalRoundsLoaded,
+      totalRoundsFired: totalRoundsFiredByRecipe[row.id] ?? 0,
       // Most recent Loading Session or Range Session logged for this recipe
       // — falls back to the recipe's own created_at (nothing logged yet
       // still has a meaningful "added on" date for sorting/display) rather

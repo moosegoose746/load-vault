@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
+import MetricCard from './MetricCard.jsx';
 
 // A small label/value stat box — same visual treatment Best MOA already
 // used, pulled out since the card now shows four of these instead of one.
@@ -57,6 +58,8 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete }) {
       <div className="grid grid-cols-2 gap-2">
         <CardStat label="Best MOA" value={moaFmt(recipe.bestMoa)} />
         <CardStat label="Recent MOA" value={moaFmt(recipe.recentMoa)} />
+        <CardStat label="Cost/Round" value={moneyFmt(recipe.costPerRound)} />
+        <CardStat label="Rounds Fired" value={recipe.totalRoundsFired || null} />
         <CardStat label="Total Spent" value={moneyFmt(recipe.totalMoneySpent)} />
         <CardStat label="Money Saved" value={moneyFmt(recipe.moneySaved)} />
       </div>
@@ -130,7 +133,15 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete }) {
 // the same caliber/firearm/component filters the Sidebar already offers
 // (once there's enough recipes for that to matter) and quick Edit/Delete
 // actions right on each card instead of only after opening one.
-export default function RecipesHomePage({ userRecipes, onSelectRecipe, onNewRecipe, onEditRecipe, onDeleteRecipe, onViewArchived }) {
+export default function RecipesHomePage({
+  userRecipes,
+  lifetimeSaved,
+  onSelectRecipe,
+  onNewRecipe,
+  onEditRecipe,
+  onDeleteRecipe,
+  onViewArchived,
+}) {
   const [caliberFilter, setCaliberFilter] = useState('');
   const [firearmFilter, setFirearmFilter] = useState('');
   const [componentFilter, setComponentFilter] = useState('');
@@ -140,6 +151,42 @@ export default function RecipesHomePage({ userRecipes, onSelectRecipe, onNewReci
   // showing filter controls above a handful of cards that are already
   // easy to scan.
   const showFilters = (userRecipes?.length ?? 0) > 3;
+
+  // Account-wide totals row — the "dashboard" part of this page, per the
+  // progress log's Recipes Home follow-up. Every number here is just a
+  // sum/min over the SAME per-recipe fields already computed once in
+  // fetchUserRecipes (see lib/recipes.js) — no separate aggregate query,
+  // since userRecipes already has everything needed. Money Saved is the
+  // one exception: it uses the `lifetimeSaved` prop (Header's existing
+  // fetchLifetimeMoneySaved value, already fetched by App.jsx for the
+  // header badge) rather than re-summing recipe.moneySaved here, so the
+  // two never show two different numbers for the same underlying stat.
+  const totals = useMemo(() => {
+    const list = userRecipes || [];
+    let totalRoundsLoaded = 0;
+    let totalRoundsFired = 0;
+    let totalMoneySpent = 0;
+    let hasAnyMoneySpent = false;
+    let bestMoaOverall = null;
+    for (const r of list) {
+      totalRoundsLoaded += r.totalRoundsLoaded || 0;
+      totalRoundsFired += r.totalRoundsFired || 0;
+      if (r.totalMoneySpent != null) {
+        totalMoneySpent += r.totalMoneySpent;
+        hasAnyMoneySpent = true;
+      }
+      if (r.bestMoa != null && (bestMoaOverall == null || r.bestMoa < bestMoaOverall)) {
+        bestMoaOverall = r.bestMoa;
+      }
+    }
+    return {
+      recipeCount: list.length,
+      totalRoundsLoaded,
+      totalRoundsFired,
+      totalMoneySpent: hasAnyMoneySpent ? totalMoneySpent : null,
+      bestMoaOverall,
+    };
+  }, [userRecipes]);
 
   const caliberOptions = useMemo(
     () => Array.from(new Set((userRecipes || []).map((r) => r.caliber).filter(Boolean))).sort(),
@@ -207,6 +254,28 @@ export default function RecipesHomePage({ userRecipes, onSelectRecipe, onNewReci
           </button>
         </div>
       </div>
+
+      {totals.recipeCount > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <MetricCard value={totals.recipeCount} label="Recipes" />
+          <MetricCard value={totals.totalRoundsLoaded} unit="rds" label="Rounds Loaded" />
+          <MetricCard value={totals.totalRoundsFired} unit="rds" label="Rounds Fired" />
+          <MetricCard
+            value={totals.totalMoneySpent != null ? `$${totals.totalMoneySpent.toFixed(2)}` : null}
+            label="Total Spent"
+            info="Sum of every recipe's Total Money Spent — recipes missing full component pricing in Inventory aren't counted, so this may understate your real total."
+          />
+          <MetricCard
+            value={lifetimeSaved != null ? `$${lifetimeSaved.toFixed(2)}` : null}
+            label="Total Saved"
+            info="Lifetime money saved vs. comparable factory ammo, across every recipe with a factory price set — same figure shown in the header badge."
+          />
+          <MetricCard
+            value={totals.bestMoaOverall != null ? totals.bestMoaOverall.toFixed(2) : null}
+            label="Best MOA Overall"
+          />
+        </div>
+      )}
 
       {showFilters && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded border border-slate-800 bg-slate-900/40 p-3">

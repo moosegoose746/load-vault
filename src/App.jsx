@@ -368,6 +368,7 @@ function AppShell() {
           )}
           <RecipesHomePage
             userRecipes={userRecipes}
+            lifetimeSaved={lifetimeSaved}
             onSelectRecipe={(recipeId) => {
               setActiveRecipeId(recipeId);
               setView('vault');
