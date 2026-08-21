@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Beaker, Boxes, Crosshair, Layers, LogOut, Menu, PiggyBank, Scale, Settings, Sun, X } from 'lucide-react';
+import { Beaker, Boxes, Crosshair, LayoutGrid, Layers, LogOut, Menu, PiggyBank, Scale, Settings, Sun, X } from 'lucide-react';
 import { useRangeMode } from '../context/RangeModeContext.jsx';
 
 // Section 3: "Hero Header / Navigation Bar — Amber/gold logo, Sync Status
@@ -23,6 +23,14 @@ import { useRangeMode } from '../context/RangeModeContext.jsx';
 // until a real recipe's Range Session save actually goes through it. See
 // the progress log's "Known gaps" for that as a future Tier 2/3 item.
 const VIEWS = [
+  // New landing view (see the progress log's Recipes Home discussion) — a
+  // card-grid overview of every saved recipe, now the default `view` on
+  // sign-in (see App.jsx). Deliberately separate from 'vault' below
+  // rather than replacing it: 'vault' is the working view for whichever
+  // ONE recipe is currently active (Sidebar quick-switcher + Dashboard),
+  // while 'home' is for browsing/managing all of them at once. Listed
+  // first since it's the default.
+  { key: 'home', label: 'HOME', icon: LayoutGrid },
   // Label reads "RECIPES" — the internal key stays 'vault' (App.jsx's view
   // state, useAuth defaults, etc. all still key off it) so this is purely
   // a display-text rename, not a routing change.
@@ -54,7 +62,7 @@ function LifetimeSavedBadge({ amount }) {
   );
 }
 
-export default function Header({ user, onSignOut, onOpenSettings, view = 'vault', onChangeView, lifetimeSaved }) {
+export default function Header({ user, onSignOut, onOpenSettings, view = 'home', onChangeView, lifetimeSaved }) {
   const { rangeMode, toggleRangeMode } = useRangeMode();
   const [mobileOpen, setMobileOpen] = useState(false);
   const otherViews = VIEWS.filter((v) => v.key !== view);

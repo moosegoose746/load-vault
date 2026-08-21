@@ -37,7 +37,7 @@ export async function fetchComponentsByType(type) {
  * embedded-resource syntax can't express "aggregate MIN() per recipe" —
  * the aggregation happens here in JS instead. */
 export async function fetchUserRecipes(userId) {
-  const [recipesRes, sessionsRes] = await Promise.all([
+  const [recipesRes, sessionsRes, batchesRes] = await Promise.all([
     supabase
       .from('load_recipes')
       .select(
@@ -54,17 +54,36 @@ export async function fetchUserRecipes(userId) {
       .eq('user_id', userId)
       .eq('is_archived', false)
       .order('created_at', { ascending: false }),
-    supabase.from('range_sessions').select('recipe_id, group_size_moa').eq('user_id', userId),
+    supabase.from('range_sessions').select('recipe_id, group_size_moa, created_at').eq('user_id', userId),
+    // Recipes Home (see the progress log) wants a "last worked on" date per
+    // card — bench sessions count toward that just as much as range days,
+    // so this pulls both and takes whichever is more recent per recipe,
+    // same cheap group-by-in-JS approach bestMoaByRecipe below already
+    // uses rather than a second round trip per recipe.
+    supabase.from('load_batches').select('recipe_id, created_at').eq('user_id', userId),
   ]);
   if (recipesRes.error) throw recipesRes.error;
   if (sessionsRes.error) throw sessionsRes.error;
+  if (batchesRes.error) throw batchesRes.error;
 
   const bestMoaByRecipe = {};
-  for (const s of sessionsRes.data || []) {
-    if (s.group_size_moa == null) continue;
-    if (bestMoaByRecipe[s.recipe_id] == null || s.group_size_moa < bestMoaByRecipe[s.recipe_id]) {
-      bestMoaByRecipe[s.recipe_id] = s.group_size_moa;
+  const lastActivityByRecipe = {};
+  const noteActivity = (recipeId, createdAt) => {
+    if (!createdAt) return;
+    if (!lastActivityByRecipe[recipeId] || createdAt > lastActivityByRecipe[recipeId]) {
+      lastActivityByRecipe[recipeId] = createdAt;
     }
+  };
+  for (const s of sessionsRes.data || []) {
+    if (s.group_size_moa != null) {
+      if (bestMoaByRecipe[s.recipe_id] == null || s.group_size_moa < bestMoaByRecipe[s.recipe_id]) {
+        bestMoaByRecipe[s.recipe_id] = s.group_size_moa;
+      }
+    }
+    noteActivity(s.recipe_id, s.created_at);
+  }
+  for (const b of batchesRes.data || []) {
+    noteActivity(b.recipe_id, b.created_at);
   }
 
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : null);
@@ -79,6 +98,11 @@ export async function fetchUserRecipes(userId) {
     primer: componentLabel(row.primer),
     brass: componentLabel(row.brass),
     bestMoa: bestMoaByRecipe[row.id] ?? null,
+    // Most recent Loading Session or Range Session logged for this recipe
+    // — falls back to the recipe's own created_at (nothing logged yet
+    // still has a meaningful "added on" date for sorting/display) rather
+    // than null, which would read as broken instead of just "brand new."
+    lastActivityAt: lastActivityByRecipe[row.id] ?? row.created_at,
   }));
 }
 

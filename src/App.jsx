@@ -3,6 +3,7 @@ import { useAuth } from './hooks/useAuth.js';
 import { RangeModeProvider, useRangeMode } from './context/RangeModeContext.jsx';
 import { SyncProvider } from './context/SyncContext.jsx';
 import Header from './components/Header.jsx';
+import RecipesHomePage from './components/RecipesHomePage.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import RecipeForm from './components/RecipeForm.jsx';
@@ -102,7 +103,13 @@ function AppShell() {
   const user = DEV_SKIP_AUTH ? auth.user ?? DEV_USER : auth.user;
   const loading = DEV_SKIP_AUTH ? false : auth.loading;
 
-  const [view, setView] = useState('vault'); // 'vault' | 'inventory' | 'firearms' | 'workups' | 'compare'
+  // 'home' | 'vault' | 'inventory' | 'firearms' | 'workups' | 'compare'.
+  // 'home' (the recipe card grid — see RecipesHomePage.jsx) is the
+  // default landing view on sign-in now, per the Recipes Home discussion
+  // in the progress log; 'vault' (Sidebar + Dashboard for whichever ONE
+  // recipe is active) is still what opening/creating/editing a recipe
+  // switches to.
+  const [view, setView] = useState('home');
   // Deep-link target for the Workups page — set when a recipe's Overview
   // tab's "Part of a Load Workup" card is clicked (see Dashboard.jsx),
   // consumed once by WorkupsPage then cleared.
@@ -234,6 +241,32 @@ function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingProgress, userRecipes.length, auth.profile]);
 
+  // Editing from Recipes Home (see RecipesHomePage.jsx) can target a
+  // recipe that ISN'T the currently active one — unlike Dashboard's own
+  // Edit button, which only ever acts on whichever recipe is already
+  // loaded. RecipeForm's `editingRecipe` prop needs the FULL detailed
+  // recipe (raw component ids for its selects, not just the lightweight
+  // title/caliber/firearm fetchUserRecipes returns for the grid), and
+  // that only exists once `activeRecipe` has actually been fetched for
+  // the right id. So this makes the recipe active first, then waits (via
+  // the effect below) for that fetch to land before opening the form —
+  // opening it immediately would show whichever recipe was previously
+  // active for a beat. Also used by Dashboard's own Edit button now
+  // (always a same-id no-op fast path there, since that recipe's already
+  // active), so there's one code path instead of two.
+  const [pendingEditRecipeId, setPendingEditRecipeId] = useState(null);
+  const handleEditRecipe = useCallback((recipeId) => {
+    setPendingEditRecipeId(recipeId);
+    setActiveRecipeId(recipeId);
+  }, []);
+  useEffect(() => {
+    if (pendingEditRecipeId && activeRecipe?.id === pendingEditRecipeId) {
+      setRecipeFormMode('edit');
+      setRecipeFormOpen(true);
+      setPendingEditRecipeId(null);
+    }
+  }, [pendingEditRecipeId, activeRecipe]);
+
   const handleDeleteRecipe = useCallback(
     async (recipeId) => {
       try {
@@ -309,7 +342,46 @@ function AppShell() {
         lifetimeSaved={lifetimeSaved}
       />
       {user ? (
-        view === 'inventory' ? (
+        view === 'home' ? (
+          <>
+          {/* Now the first thing a new user sees (Home replaced the old
+              default of landing straight in the demo recipe's vault view
+              — see the Recipes Home discussion in the progress log), so
+              the "Getting Started" checklist moved here from the vault
+              view below — it's onboarding content, and this is the new
+              front door. */}
+          {onboardingProgress && !auth.profile?.onboarding_dismissed && (
+            <div className="mx-auto w-full max-w-7xl px-4 pt-4">
+              <GettingStartedCard
+                hasFirearm={onboardingProgress.hasFirearm}
+                hasInventory={onboardingProgress.hasInventory}
+                hasRecipe={userRecipes.length > 0}
+                onGoTo={setView}
+                onDismiss={() => {
+                  setOnboardingProgress(null);
+                  auth.updateProfile({ onboarding_dismissed: true }).catch((err) => {
+                    console.error('Failed to dismiss onboarding checklist', err);
+                  });
+                }}
+              />
+            </div>
+          )}
+          <RecipesHomePage
+            userRecipes={userRecipes}
+            onSelectRecipe={(recipeId) => {
+              setActiveRecipeId(recipeId);
+              setView('vault');
+            }}
+            onNewRecipe={() => {
+              setRecipeFormMode('create');
+              setRecipeFormOpen(true);
+            }}
+            onEditRecipe={handleEditRecipe}
+            onDeleteRecipe={handleDeleteRecipe}
+            onViewArchived={() => setArchivedModalOpen(true)}
+          />
+          </>
+        ) : view === 'inventory' ? (
           <InventoryPage authUser={auth.user} />
         ) : view === 'firearms' ? (
           <FirearmsPage
@@ -329,22 +401,6 @@ function AppShell() {
           <ComparePage authUser={auth.user} />
         ) : (
           <>
-          {onboardingProgress && !auth.profile?.onboarding_dismissed && (
-            <div className="mx-auto w-full max-w-7xl px-4 pt-4">
-              <GettingStartedCard
-                hasFirearm={onboardingProgress.hasFirearm}
-                hasInventory={onboardingProgress.hasInventory}
-                hasRecipe={userRecipes.length > 0}
-                onGoTo={setView}
-                onDismiss={() => {
-                  setOnboardingProgress(null);
-                  auth.updateProfile({ onboarding_dismissed: true }).catch((err) => {
-                    console.error('Failed to dismiss onboarding checklist', err);
-                  });
-                }}
-              />
-            </div>
-          )}
           <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col sm:flex-row">
             <Sidebar
               recipe={activeRecipe}
@@ -367,10 +423,7 @@ function AppShell() {
                 setPendingWorkupId(workupId);
                 setView('workups');
               }}
-              onEditRecipe={() => {
-                setRecipeFormMode('edit');
-                setRecipeFormOpen(true);
-              }}
+              onEditRecipe={handleEditRecipe}
               onDeleteRecipe={handleDeleteRecipe}
             />
           </div>
@@ -397,6 +450,12 @@ function AppShell() {
           refreshRecipeList();
           refreshLifetimeSaved();
           setActiveRecipeId(newId);
+          // Creating a recipe (whether the "New Recipe" button was
+          // clicked from Recipes Home or from the Sidebar) clearly means
+          // "I want to start filling this out" — jump straight into it
+          // rather than leaving them on Home looking at the new card.
+          // No-op when already on 'vault' (Sidebar's own New Recipe).
+          setView('vault');
         }}
         onUpdated={() => {
           // Unlike onCreated, activeRecipeId doesn't change here — the
