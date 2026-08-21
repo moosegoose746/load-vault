@@ -84,6 +84,21 @@ function PrimaryStat({ label, value, variant }) {
   );
 }
 
+// A labeled spec box (Firearm, Powder, Bullet, Primer, Brass) — amber-
+// outlined and centered, matching the same "highlighted tile" language the
+// stat boxes below already use, rather than the low-contrast plain text
+// line this used to be. Higher-contrast text (slate-200/slate-400) than
+// the old slate-600/slate-400 pairing, which read as too dim against the
+// card's dark background.
+function SpecBox({ label, value }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-0.5 rounded border border-amber-600/50 bg-slate-900/60 px-2 py-1.5 text-center">
+      <span className="font-mono text-[9px] uppercase tracking-widest text-amber-500">{label}</span>
+      <span className="w-full truncate font-mono text-xs font-semibold text-slate-200">{value || '—'}</span>
+    </div>
+  );
+}
+
 const moneyFmt = (v) => (v != null ? `$${v.toFixed(2)}` : null);
 const moaFmt = (v) => (v != null ? v.toFixed(2) : null);
 
@@ -184,26 +199,23 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete, isBestOverall, selectMod
           </span>
         )}
         {recipe.firearm && (
-          <p className="truncate text-xs text-slate-400">
-            <span className="text-slate-600">Firearm:</span> {recipe.firearm}
-          </p>
+          <div className="mt-1">
+            <SpecBox label="Firearm" value={recipe.firearm} />
+          </div>
         )}
         {(recipe.chargeGrains != null || recipe.powder || recipe.bullet || recipe.primer || recipe.brass) && (
-          <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-slate-400">
-            <p className="truncate">
-              <span className="text-slate-600">Powder:</span>{' '}
-              {recipe.chargeGrains != null ? `${recipe.chargeGrains}gr ` : ''}
-              {recipe.powder || '—'}
-            </p>
-            <p className="truncate">
-              <span className="text-slate-600">Bullet:</span> {recipe.bullet || '—'}
-            </p>
-            <p className="truncate">
-              <span className="text-slate-600">Primer:</span> {recipe.primer || '—'}
-            </p>
-            <p className="truncate">
-              <span className="text-slate-600">Brass:</span> {recipe.brass || '—'}
-            </p>
+          <div className="mt-1 grid grid-cols-2 gap-1.5">
+            <SpecBox
+              label="Powder"
+              value={
+                recipe.chargeGrains != null
+                  ? `${recipe.chargeGrains}gr ${recipe.powder || '—'}`
+                  : recipe.powder
+              }
+            />
+            <SpecBox label="Bullet" value={recipe.bullet} />
+            <SpecBox label="Primer" value={recipe.primer} />
+            <SpecBox label="Brass" value={recipe.brass} />
           </div>
         )}
       </div>
