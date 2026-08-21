@@ -12,6 +12,7 @@ import {
   Share2,
   SlidersHorizontal,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 import RecipeHeroCard from './RecipeHeroCard.jsx';
@@ -24,6 +25,8 @@ import VelocitySparkline from './VelocitySparkline.jsx';
 import TargetHistoryModal from './TargetHistoryModal.jsx';
 import LoadingHistoryModal from './LoadingHistoryModal.jsx';
 import LoadingHistoryList from './LoadingHistoryList.jsx';
+import RangeSessionHistoryList from './RangeSessionHistoryList.jsx';
+import RangeSessionReferenceCard from './RangeSessionReferenceCard.jsx';
 import FiringHistoryModal from './FiringHistoryModal.jsx';
 import TargetCalculator from './TargetCalculator.jsx';
 import TargetExportModal from './TargetExportModal.jsx';
@@ -35,6 +38,7 @@ import {
   createRangeSession,
   fetchVelocityTrend,
   fetchTargetHistory,
+  fetchRangeSessionHistory,
   fetchLoadingHistory,
   fetchFiringHistory,
 } from '../lib/recipes.js';
@@ -99,6 +103,63 @@ export default function Dashboard({
   const { saveSession, pendingCount, status } = useSync();
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [saveError, setSaveError] = useState('');
+  // What actually got logged by the last successful save on this tab —
+  // shown as a confirmation right after Save, then cleared the next time
+  // something's edited, so it reads as "here's what just happened"
+  // instead of lingering like it's still-current data (see the Range Day
+  // overhaul discussion in the progress log).
+  const [lastSavedSummary, setLastSavedSummary] = useState(null);
+  // Bumped after every successful save (or an explicit New Session
+  // discard) to force TargetCalculator/ChronoImport to remount via their
+  // `key` prop below — the cleanest way to guarantee their internal state
+  // (plotted shots, calibration, loaded photo, imported chrono file)
+  // actually goes back to blank, rather than trying to reset each of
+  // those pieces individually from the outside.
+  const [sessionKey, setSessionKey] = useState(0);
+  // Free-form notes for THIS range session — bench conditions, load
+  // performance observations, lot changes — Range Sessions never had
+  // this before (Loading Sessions did) even though it's exactly the kind
+  // of thing worth jotting down at the range. See
+  // schema_range_sessions_notes.sql.
+  const [sessionNotes, setSessionNotes] = useState('');
+
+  // Full Session (target photo + chrono + MOA) vs Quick Log (rounds fired
+  // only — plinking/steel days where nobody's measuring a group). Not
+  // every range trip is a formal accuracy test, and the old layout made
+  // that its own kind of friction: to log "put 50 through it, no group,"
+  // you still had to scroll past Target Analysis and Chrono Import. The
+  // choice is remembered per recipe (most people either always chrono a
+  // given load or never do) via localStorage, read once at mount — a
+  // fresh Dashboard instance mounts per recipe switch (see
+  // key={activeRecipeId} in App.jsx), so this lazy initializer re-runs
+  // correctly every time the active recipe changes.
+  const [rangeMode, setRangeMode] = useState(() => {
+    if (!activeRecipeId) return 'full';
+    try {
+      return window.localStorage.getItem(`loadvault:rangeMode:${activeRecipeId}`) === 'quick'
+        ? 'quick'
+        : 'full';
+    } catch {
+      return 'full';
+    }
+  });
+  const handleRangeModeChange = (mode) => {
+    setRangeMode(mode);
+    if (activeRecipeId) {
+      try {
+        window.localStorage.setItem(`loadvault:rangeMode:${activeRecipeId}`, mode);
+      } catch {
+        // Private browsing / storage disabled — the toggle still works
+        // for this visit, it just won't be remembered next time.
+      }
+    }
+  };
+
+  // Range Session History — every session logged for this recipe, newest
+  // first, shown inline at the bottom of the tab (see Loading History's
+  // same pattern). Fetched the first time this tab is opened.
+  const [rangeHistory, setRangeHistory] = useState(null);
+  const [rangeHistoryLoading, setRangeHistoryLoading] = useState(false);
 
   // Range Session's "Rounds Fired" is just a record of how many rounds
   // were actually shot today (drawing down Rounds On Hand) — separate
@@ -272,6 +333,20 @@ export default function Dashboard({
     }
   }, [dashboardTab, loadingHistory, isRealRecipe, activeRecipeId]);
 
+  // Same lazy-fetch-on-tab-open treatment for Range Session History.
+  useEffect(() => {
+    if (dashboardTab === 'range' && rangeHistory === null && isRealRecipe) {
+      setRangeHistoryLoading(true);
+      fetchRangeSessionHistory(activeRecipeId)
+        .then(setRangeHistory)
+        .catch((err) => {
+          console.error('Failed to load range session history', err);
+          setRangeHistory([]);
+        })
+        .finally(() => setRangeHistoryLoading(false));
+    }
+  }, [dashboardTab, rangeHistory, isRealRecipe, activeRecipeId]);
+
   // Prefer the live reading from shots currently being plotted on the
   // target; fall back to whatever MOA was saved on the recipe's last range
   // session once nothing is actively being measured. Distance follows the
@@ -379,11 +454,18 @@ export default function Dashboard({
     setDistanceEdited(false);
   }, [activeRecipeId]);
 
+  // Deliberately keyed on chronoShots (THIS visit's import), not
+  // displayShots (which falls back to the last SAVED session's shots) —
+  // defaulting from the last save is exactly the quiet-inheritance
+  // behavior that made the old Range Day tab unclear about whether you
+  // were looking at history or a form (see the overhaul discussion in the
+  // progress log). Rounds Fired should start blank until either a chrono
+  // file is imported this visit or the user types a number themselves.
   useEffect(() => {
     if (!roundsFiredEdited) {
-      setRoundsFired(displayShots?.length ? String(displayShots.length) : '');
+      setRoundsFired(chronoShots?.length ? String(chronoShots.length) : '');
     }
-  }, [displayShots?.length, roundsFiredEdited]);
+  }, [chronoShots?.length, roundsFiredEdited]);
 
   useEffect(() => {
     if (!firearmIdEdited) {
@@ -472,8 +554,34 @@ export default function Dashboard({
     }
   };
 
+  // Clears everything that should NOT survive past a logged (or
+  // discarded) session — the target photo/plot, any imported chrono file,
+  // Rounds Fired, and session notes — so the entry area is genuinely
+  // blank the next time around instead of quietly carrying the just-saved
+  // data forward. Bumping sessionKey forces TargetCalculator/ChronoImport
+  // to remount, which is what actually clears THEIR internal state (see
+  // the sessionKey declaration above). Firearm is deliberately left
+  // alone — same "remembers your last pick" treatment it already had,
+  // and someone logging several sessions in one sitting is usually still
+  // shooting the same gun.
+  const resetSessionEntry = () => {
+    setTarget({ imageEl: null, imageBlob: null, shots: [], moa: null, groupInches: null });
+    setChronoShots(null);
+    setRoundsFired('');
+    setRoundsFiredEdited(false);
+    setSessionNotes('');
+    setSessionKey((k) => k + 1);
+  };
+
+  const handleDiscardSession = () => {
+    resetSessionEntry();
+    setLastSavedSummary(null);
+    setSaveError('');
+  };
+
   const handleSave = async () => {
     setSaveError('');
+    const isQuickLog = rangeMode === 'quick';
 
     if (isRealRecipe) {
       // Real recipe: write an actual range_sessions row (+ shot_logs if a
@@ -486,25 +594,40 @@ export default function Dashboard({
       }
       setSaveState('saving');
       try {
-        const stats = chronoShots ? computeVelocityStats(chronoShots) : null;
+        // Quick Log skips Target Analysis/chrono entirely (see rangeMode
+        // above) — group size, velocity stats, distance, and the photo
+        // simply don't exist for that kind of session, so every one of
+        // those goes in as null/empty rather than whatever might be left
+        // over in `target`/`chronoShots` from a mode switch mid-visit.
+        const stats = !isQuickLog && chronoShots ? computeVelocityStats(chronoShots) : null;
+        const roundsFiredToSave =
+          Number.isFinite(roundsFiredNum) && roundsFiredNum >= 0 ? roundsFiredNum : null;
         await createRangeSession({
           recipeId: activeRecipeId,
           userId: authUser.id,
-          distanceYards: sessionDistanceYards,
-          groupSizeMoa: target.moa,
-          groupInches: target.groupInches,
+          distanceYards: isQuickLog ? null : sessionDistanceYards,
+          groupSizeMoa: isQuickLog ? null : target.moa,
+          groupInches: isQuickLog ? null : target.groupInches,
           avgVelocity: stats?.avg ?? null,
           stdDevFps: stats?.sd ?? null,
           extremeSpread: stats?.es ?? null,
-          shots: chronoShots ?? [],
-          shotCoordinates: target.shots ?? [],
-          imageBlob: target.imageBlob,
-          roundsFired: Number.isFinite(roundsFiredNum) && roundsFiredNum >= 0 ? roundsFiredNum : null,
+          shots: !isQuickLog && chronoShots ? chronoShots : [],
+          shotCoordinates: !isQuickLog && target.shots ? target.shots : [],
+          imageBlob: isQuickLog ? null : target.imageBlob,
+          roundsFired: roundsFiredToSave,
           firearmId: firearmId || null,
+          notes: sessionNotes || null,
         });
 
         setSaveState('saved');
+        setLastSavedSummary({
+          roundsFired: roundsFiredToSave,
+          moa: isQuickLog ? null : target.moa,
+          quickLog: isQuickLog,
+        });
         onSessionSaved?.(); // refetches the recipe, updating Rounds On Hand
+        setRangeHistory(null); // invalidate the cached history list — a new session just landed
+        resetSessionEntry();
 
         // Invalidate the lazily-fetched Velocity Trend / Target History
         // caches — a new session just landed for THIS recipe, so the old
@@ -564,15 +687,21 @@ export default function Dashboard({
       // goes through the offline-queue simulation from Phase 4 instead.
       await saveSession({
         title: recipe.title,
-        distanceYards: sessionDistanceYards,
-        moa: target.moa,
-        groupInches: target.groupInches,
-        shotCount: target.shots.length,
-        avgVelocity: recipe.avgVelocity,
-        stdDevFps: recipe.stdDevFps,
-        extremeSpread: recipe.extremeSpread,
+        distanceYards: isQuickLog ? null : sessionDistanceYards,
+        moa: isQuickLog ? null : target.moa,
+        groupInches: isQuickLog ? null : target.groupInches,
+        shotCount: isQuickLog ? 0 : target.shots.length,
+        avgVelocity: isQuickLog ? null : recipe.avgVelocity,
+        stdDevFps: isQuickLog ? null : recipe.stdDevFps,
+        extremeSpread: isQuickLog ? null : recipe.extremeSpread,
       });
       setSaveState('saved');
+      setLastSavedSummary({
+        roundsFired: Number.isFinite(roundsFiredNum) && roundsFiredNum >= 0 ? roundsFiredNum : null,
+        moa: isQuickLog ? null : target.moa,
+        quickLog: isQuickLog,
+      });
+      resetSessionEntry();
       setTimeout(() => setSaveState('idle'), 2000);
     }
   };
@@ -1126,43 +1255,100 @@ export default function Dashboard({
       </div>
 
       <div className={dashboardTab === 'range' ? 'flex flex-col gap-4' : 'hidden'}>
-          <div className="rounded border border-slate-800 bg-panel p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="flex items-center font-mono text-xs uppercase tracking-widest text-amber-400">
-                Target Analysis
-                <InfoTooltip>
-                  MOA is distance-dependent — 1 MOA is about 1.047" at 100 yards, but roughly double
-                  that in actual inches at 200 yards for the same MOA value. Set the real distance
-                  this target was shot at so the MOA figure below (and whatever gets saved to this
-                  session) is measuring against the right number.
-                </InfoTooltip>
-              </h2>
-              <label className="flex items-center gap-1.5">
-                <span className="font-mono text-[10px] uppercase text-slate-500">Distance (yd)</span>
-                <input
-                  type="number"
-                  step="1"
-                  min="1"
-                  value={sessionDistanceYards ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSessionDistanceYards(val ? Number(val) : null);
-                    setDistanceEdited(true);
-                  }}
-                  className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
-                />
-              </label>
-            </div>
-            <TargetCalculator
-              distanceYards={sessionDistanceYards}
-              onStateChange={setTarget}
-              initialImageUrl={recipe.targetImageUrl}
-            />
+          {/* What's already on record for this recipe's range side — kept
+              entirely separate from the entry form below it, rather than
+              quietly pre-loading into it (see the Range Day overhaul
+              discussion in the progress log; this used to be the source
+              of the "did my velocity data disappear" confusion). */}
+          <RangeSessionReferenceCard recipe={recipe} />
+
+          {/* Full Session vs Quick Log — not every range trip is a formal
+              accuracy test. Quick Log skips Target Analysis/chrono
+              entirely for plinking/steel days where the only thing worth
+              recording is how many rounds went downrange. Remembered per
+              recipe (see rangeMode above). */}
+          <div className="flex flex-wrap items-center gap-2 rounded border border-slate-800 bg-panel p-3">
+            <span className="mr-1 font-mono text-[11px] uppercase tracking-wide text-slate-500">
+              Log a Range Session
+            </span>
+            <button
+              type="button"
+              onClick={() => handleRangeModeChange('full')}
+              className={`flex items-center gap-1.5 rounded border px-3 py-1.5 font-mono text-xs ${
+                rangeMode === 'full'
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                  : 'border-slate-700 text-slate-400 hover:border-slate-500'
+              }`}
+            >
+              <Crosshair size={12} />
+              Full Session
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRangeModeChange('quick')}
+              className={`flex items-center gap-1.5 rounded border px-3 py-1.5 font-mono text-xs ${
+                rangeMode === 'quick'
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                  : 'border-slate-700 text-slate-400 hover:border-slate-500'
+              }`}
+            >
+              <Zap size={12} />
+              Quick Log
+            </button>
+            <InfoTooltip>
+              Full Session records a target photo, group size/MOA, and chrono data. Quick Log skips
+              all of that — just Rounds Fired (and optionally which firearm) for plinking/steel days
+              where nobody's measuring a formal group.
+            </InfoTooltip>
           </div>
 
-          <VelocityLog shots={displayShots} avgVelocity={displayAvgVelocity} />
+          {rangeMode === 'full' && (
+            <>
+              <div className="rounded border border-slate-800 bg-panel p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="flex items-center font-mono text-xs uppercase tracking-widest text-amber-400">
+                    Target Analysis
+                    <InfoTooltip>
+                      MOA is distance-dependent — 1 MOA is about 1.047" at 100 yards, but roughly
+                      double that in actual inches at 200 yards for the same MOA value. Set the real
+                      distance this target was shot at so the MOA figure below (and whatever gets
+                      saved to this session) is measuring against the right number.
+                    </InfoTooltip>
+                  </h2>
+                  <label className="flex items-center gap-1.5">
+                    <span className="font-mono text-[10px] uppercase text-slate-500">Distance (yd)</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={sessionDistanceYards ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSessionDistanceYards(val ? Number(val) : null);
+                        setDistanceEdited(true);
+                      }}
+                      className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                    />
+                  </label>
+                </div>
+                {/* key={sessionKey}: forces a fresh TargetCalculator instance
+                    after every save/discard so its internal state (photo,
+                    plotted shots, calibration) actually goes back to blank
+                    — see resetSessionEntry above. No more initialImageUrl —
+                    the last saved photo now only ever shows in the
+                    reference card above, never silently loaded into the
+                    live form. */}
+                <TargetCalculator key={sessionKey} distanceYards={sessionDistanceYards} onStateChange={setTarget} />
+              </div>
 
-          <ChronoImport onImportComplete={setChronoShots} />
+              {/* THIS session's chrono'd shots only — no fallback to the
+                  last saved session's velocity log, same reasoning as
+                  dropping initialImageUrl above. */}
+              <VelocityLog shots={chronoShots || []} avgVelocity={chronoShots?.length ? computeVelocityStats(chronoShots).avg : null} />
+
+              <ChronoImport key={sessionKey} onImportComplete={setChronoShots} />
+            </>
+          )}
 
           {isRealRecipe && (
             <div className="flex flex-wrap items-end gap-3 rounded border border-slate-800 bg-panel p-4">
@@ -1203,6 +1389,16 @@ export default function Dashboard({
                   </span>
                 )}
               </label>
+              <label className="flex min-w-[16rem] flex-1 flex-col gap-1">
+                <span className="font-mono text-[10px] uppercase text-slate-500">Notes (optional)</span>
+                <input
+                  type="text"
+                  value={sessionNotes}
+                  onChange={(e) => setSessionNotes(e.target.value)}
+                  placeholder="e.g. conditions, load observations, lot changes"
+                  className="rounded border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </label>
               <p className="max-w-md text-xs text-slate-400">
                 Draws down Rounds On Hand — doesn't touch your component stock, since those were
                 already used when you logged a loading session. Picking a firearm also adds these
@@ -1218,6 +1414,19 @@ export default function Dashboard({
             </div>
           )}
 
+          {lastSavedSummary && (
+            <p className="flex items-center gap-1.5 rounded border border-emerald-700 bg-emerald-500/10 px-3 py-2 font-mono text-xs text-emerald-300">
+              <Save size={13} className="shrink-0" />
+              Session logged — {lastSavedSummary.roundsFired != null ? `${lastSavedSummary.roundsFired} rds` : ''}
+              {lastSavedSummary.quickLog
+                ? ' (Quick Log)'
+                : lastSavedSummary.moa != null
+                ? `, ${lastSavedSummary.moa.toFixed(2)} MOA`
+                : ''}
+              . Ready for a new one below.
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={handleSave}
@@ -1226,6 +1435,13 @@ export default function Dashboard({
             >
               <Save size={14} />
               {saveState === 'saving' ? 'SAVING…' : saveState === 'saved' ? 'SAVED' : 'SAVE TO VAULT'}
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardSession}
+              className="flex items-center gap-2 rounded border border-slate-700 px-4 py-2 font-mono text-xs text-slate-400 hover:border-red-500 hover:text-red-400"
+            >
+              NEW SESSION
             </button>
             <button
               onClick={() => setExportOpen(true)}
@@ -1242,6 +1458,18 @@ export default function Dashboard({
               </span>
             )}
             {saveError && <span className="font-mono text-[11px] text-red-400">{saveError}</span>}
+          </div>
+
+          {/* Requested addition to this tab, same pattern as Loading
+              History on the Loading Session tab — past range days,
+              browsable right here instead of only through the small
+              "Last Target" popup. */}
+          <div className="border-t border-slate-800 pt-4">
+            <h2 className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-amber-400">
+              <Crosshair size={14} />
+              Range Session History
+            </h2>
+            <RangeSessionHistoryList history={rangeHistory} loading={rangeHistoryLoading} />
           </div>
       </div>
 

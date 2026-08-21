@@ -368,6 +368,29 @@ export async function fetchTargetHistory(recipeId) {
   return data || [];
 }
 
+/** Every Range Session logged for this recipe, newest first — the range-
+ * day counterpart to fetchLoadingHistory, and deliberately NOT filtered
+ * down to sessions with a target photo the way fetchTargetHistory above
+ * is (that one only powers the "Last Target" photo popup). A Quick Log
+ * session (see Dashboard's rangeMode) never has a photo, group, or
+ * velocity data at all — just rounds fired — and still belongs in this
+ * list; the UI tells the two kinds of row apart by checking whether
+ * group_size_moa/avg_velocity_fps are null, not by a separate flag,
+ * since "no group was measured" is the same honest state regardless of
+ * which entry mode produced it. Powers the inline Range Session History
+ * on the Range Day tab. */
+export async function fetchRangeSessionHistory(recipeId) {
+  const { data, error } = await supabase
+    .from('range_sessions')
+    .select(
+      'id, distance_yards, group_size_moa, group_size_inches, avg_velocity_fps, std_dev_fps, extreme_spread_fps, rounds_fired, notes, created_at'
+    )
+    .eq('recipe_id', recipeId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 /** Every Loading Session (load_batches row) ever logged for this recipe,
  * newest first — the full bench history, as opposed to
  * fetchLastLoadingBatch above which only grabs the single most recent
@@ -488,6 +511,12 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     firearmLabel: row.firearm?.name ?? (row.rifle_model || null),
     distanceYards: session?.distance_yards ?? 100,
     groupSizeMoa: session?.group_size_moa ?? null,
+    // Companion to groupSizeMoa above — MOA alone means nothing without
+    // knowing the distance it was measured at, and plenty of shooters
+    // think in inches at the actual distance shot rather than doing MOA
+    // math in their head. Shown alongside MOA wherever group size renders
+    // (see the Range Day reference card / history list).
+    groupSizeInches: session?.group_size_inches ?? null,
     avgVelocity: session?.avg_velocity_fps ?? null,
     stdDevFps: session?.std_dev_fps ?? null,
     extremeSpread: session?.extreme_spread_fps ?? null,
@@ -920,6 +949,7 @@ export async function createRangeSession({
   imageBlob,
   roundsFired,
   firearmId,
+  notes,
 }) {
   let targetImageUrl = null;
   if (imageBlob) {
@@ -937,7 +967,14 @@ export async function createRangeSession({
     .insert({
       recipe_id: recipeId,
       user_id: userId,
-      distance_yards: distanceYards ?? 100,
+      // Was `distanceYards ?? 100` — that default made sense back when
+      // every session went through Target Analysis and had a real
+      // distance one way or another. A Quick Log session (see Dashboard's
+      // rangeMode) never collects a distance at all, so forcing it to
+      // "100" would show a fabricated number in history instead of
+      // honestly having none. Full Session still always supplies a real
+      // value here (sessionDistanceYards itself defaults to 100 upstream).
+      distance_yards: distanceYards ?? null,
       group_size_moa: groupSizeMoa,
       group_size_inches: groupInches,
       avg_velocity_fps: avgVelocity != null ? Math.round(avgVelocity) : null,
@@ -947,6 +984,7 @@ export async function createRangeSession({
       shot_coordinates: shotCoordinates && shotCoordinates.length ? shotCoordinates : null,
       rounds_fired: roundsFired ?? null,
       firearm_id: firearmId || null,
+      notes: notes || null,
     })
     .select()
     .single();
