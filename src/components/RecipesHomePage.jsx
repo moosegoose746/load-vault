@@ -1,18 +1,39 @@
 import { useMemo, useState } from 'react';
 import { ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
 
-// One recipe, as a card. Deliberately keeps the same lightweight fields
-// fetchUserRecipes already computes cheaply for the whole list (title,
-// caliber, firearm, bestMoa, lastActivityAt) rather than pulling in
-// Cost/Round or similar — that number needs a full per-recipe inventory-
-// price join (see calculateCostPerRound in lib/recipes.js), which is fine
-// to pay for ONE recipe at a time on Dashboard but would mean N extra
-// joins just to render this grid. Edit/Delete mirror FirearmsPage's
-// FirearmCard pattern exactly (same confirm-before-delete flow) for
-// consistency across the app's card-grid pages.
+// A small label/value stat box — same visual treatment Best MOA already
+// used, pulled out since the card now shows four of these instead of one.
+function CardStat({ label, value }) {
+  return (
+    <div className="flex items-center justify-between rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
+      <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">{label}</span>
+      <span className="font-mono text-sm font-semibold text-amber-400">{value ?? '—'}</span>
+    </div>
+  );
+}
+
+const moneyFmt = (v) => (v != null ? `$${v.toFixed(2)}` : null);
+const moaFmt = (v) => (v != null ? v.toFixed(2) : null);
+
+// One recipe, as a card. Caliber and Firearm get their own labeled lines
+// instead of being joined into one bare "X · Y" subtitle — a recipe whose
+// linked firearm happens to be named after its own caliber (a plausible
+// naming choice, e.g. a firearm called ".270 Winchester") used to render
+// as "X · X" with nothing distinguishing which word was which. Best MOA
+// (tightest group ever) and Most Recent MOA (the last one actually
+// measured) are shown separately — "how good has this load ever shot" and
+// "how's it shooting lately" are genuinely different questions, and they
+// can diverge (see Dashboard's Quick Log discussion in the progress log:
+// a recipe's most recent session might not have a measured group at all).
+// Total Money Spent and Money Saved reuse the exact same per-recipe cost
+// math Dashboard uses, computed in bulk against one shared inventory
+// price map instead of one query per card (see fetchUserRecipes in
+// lib/recipes.js) — that's what keeps this affordable to show for every
+// card at once. Edit/Delete mirror FirearmsPage's FirearmCard pattern
+// exactly (same confirm-before-delete flow) for consistency across the
+// app's card-grid pages.
 function RecipeCard({ recipe, onOpen, onEdit, onDelete }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const subtitle = [recipe.caliber, recipe.firearm].filter(Boolean).join(' · ');
 
   return (
     <div
@@ -21,14 +42,23 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete }) {
     >
       <div className="min-w-0">
         <h3 className="truncate font-mono text-sm font-bold text-amber-400">{recipe.title}</h3>
-        {subtitle && <p className="truncate text-xs text-slate-400">{subtitle}</p>}
+        {recipe.caliber && (
+          <p className="truncate text-xs text-slate-400">
+            <span className="text-slate-600">Caliber:</span> {recipe.caliber}
+          </p>
+        )}
+        {recipe.firearm && (
+          <p className="truncate text-xs text-slate-400">
+            <span className="text-slate-600">Firearm:</span> {recipe.firearm}
+          </p>
+        )}
       </div>
 
-      <div className="flex items-center justify-between rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Best MOA</span>
-        <span className="font-mono text-sm font-semibold text-amber-400">
-          {recipe.bestMoa != null ? recipe.bestMoa.toFixed(2) : '—'}
-        </span>
+      <div className="grid grid-cols-2 gap-2">
+        <CardStat label="Best MOA" value={moaFmt(recipe.bestMoa)} />
+        <CardStat label="Recent MOA" value={moaFmt(recipe.recentMoa)} />
+        <CardStat label="Total Spent" value={moneyFmt(recipe.totalMoneySpent)} />
+        <CardStat label="Money Saved" value={moneyFmt(recipe.moneySaved)} />
       </div>
 
       {recipe.lastActivityAt && (

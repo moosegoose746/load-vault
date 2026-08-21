@@ -31,10 +31,13 @@ const VIEWS = [
   // while 'home' is for browsing/managing all of them at once. Listed
   // first since it's the default.
   { key: 'home', label: 'HOME', icon: LayoutGrid },
-  // Label reads "RECIPES" — the internal key stays 'vault' (App.jsx's view
-  // state, useAuth defaults, etc. all still key off it) so this is purely
-  // a display-text rename, not a routing change.
-  { key: 'vault', label: 'RECIPES', icon: Crosshair },
+  // Label reads "LAST RECIPE" now that Home (above) is the default
+  // landing view and this one just reopens whichever recipe was last
+  // active — "RECIPES" stopped being accurate once it wasn't the only
+  // (or the first) place to see the recipe list. The internal key stays
+  // 'vault' (App.jsx's view state, useAuth defaults, etc. all still key
+  // off it) so this is purely a display-text rename, not a routing change.
+  { key: 'vault', label: 'LAST RECIPE', icon: Crosshair },
   { key: 'inventory', label: 'INVENTORY', icon: Boxes },
   { key: 'firearms', label: 'FIREARMS', icon: Layers },
   { key: 'workups', label: 'WORKUPS', icon: Beaker },

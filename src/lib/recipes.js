@@ -37,12 +37,12 @@ export async function fetchComponentsByType(type) {
  * embedded-resource syntax can't express "aggregate MIN() per recipe" —
  * the aggregation happens here in JS instead. */
 export async function fetchUserRecipes(userId) {
-  const [recipesRes, sessionsRes, batchesRes] = await Promise.all([
+  const [recipesRes, sessionsRes, batchesRes, inventoryMap] = await Promise.all([
     supabase
       .from('load_recipes')
       .select(
         `
-        id, title, created_at,
+        id, title, created_at, caliber_id, charge_weight_grains, factory_price_per_round,
         calibers ( name ),
         firearm:firearms ( name ),
         powder:components!load_recipes_powder_id_fkey ( id, brand, model ),
@@ -55,19 +55,34 @@ export async function fetchUserRecipes(userId) {
       .eq('is_archived', false)
       .order('created_at', { ascending: false }),
     supabase.from('range_sessions').select('recipe_id, group_size_moa, created_at').eq('user_id', userId),
-    // Recipes Home (see the progress log) wants a "last worked on" date per
-    // card — bench sessions count toward that just as much as range days,
-    // so this pulls both and takes whichever is more recent per recipe,
-    // same cheap group-by-in-JS approach bestMoaByRecipe below already
-    // uses rather than a second round trip per recipe.
-    supabase.from('load_batches').select('recipe_id, created_at').eq('user_id', userId),
+    // Recipes Home (see the progress log) wants a "last worked on" date and
+    // a lifetime rounds-loaded count per card — bench sessions count
+    // toward "last worked on" just as much as range days, and rounds_loaded
+    // here feeds Total Money Spent below — so this pulls both fields and
+    // aggregates in JS, same cheap group-by approach bestMoaByRecipe
+    // already uses, rather than a second round trip per recipe for either.
+    supabase.from('load_batches').select('recipe_id, created_at, rounds_loaded').eq('user_id', userId),
+    // ONE query for the user's whole inventory (not per-recipe) — the same
+    // shared map calculateCostPerRound below already takes for a single
+    // recipe on Dashboard, just reused here across every recipe in the
+    // list at once, which is what keeps Cost/Round-derived fields on this
+    // list cheap despite needing per-component pricing.
+    fetchUserInventoryMap(userId),
   ]);
   if (recipesRes.error) throw recipesRes.error;
   if (sessionsRes.error) throw sessionsRes.error;
   if (batchesRes.error) throw batchesRes.error;
 
   const bestMoaByRecipe = {};
+  // Most recent MEASURED group per recipe — NOT just whichever session is
+  // newest (a Quick Log session, see Dashboard's rangeMode, never has a
+  // group_size_moa), same "measured vs. merely latest" distinction
+  // fetchRecipeDetail's measuredSession draws, applied here for the card
+  // grid's own "Most Recent MOA" stat.
+  const recentMoaByRecipe = {};
+  const recentMoaAtByRecipe = {};
   const lastActivityByRecipe = {};
+  const totalRoundsLoadedByRecipe = {};
   const noteActivity = (recipeId, createdAt) => {
     if (!createdAt) return;
     if (!lastActivityByRecipe[recipeId] || createdAt > lastActivityByRecipe[recipeId]) {
@@ -79,31 +94,57 @@ export async function fetchUserRecipes(userId) {
       if (bestMoaByRecipe[s.recipe_id] == null || s.group_size_moa < bestMoaByRecipe[s.recipe_id]) {
         bestMoaByRecipe[s.recipe_id] = s.group_size_moa;
       }
+      if (!recentMoaAtByRecipe[s.recipe_id] || s.created_at > recentMoaAtByRecipe[s.recipe_id]) {
+        recentMoaAtByRecipe[s.recipe_id] = s.created_at;
+        recentMoaByRecipe[s.recipe_id] = s.group_size_moa;
+      }
     }
     noteActivity(s.recipe_id, s.created_at);
   }
   for (const b of batchesRes.data || []) {
     noteActivity(b.recipe_id, b.created_at);
+    totalRoundsLoadedByRecipe[b.recipe_id] = (totalRoundsLoadedByRecipe[b.recipe_id] ?? 0) + (b.rounds_loaded || 0);
   }
 
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : null);
-  return (recipesRes.data || []).map((row) => ({
-    id: row.id,
-    title: row.title,
-    created_at: row.created_at,
-    caliber: row.calibers?.name ?? null,
-    firearm: row.firearm?.name ?? null,
-    powder: componentLabel(row.powder),
-    bullet: componentLabel(row.bullet),
-    primer: componentLabel(row.primer),
-    brass: componentLabel(row.brass),
-    bestMoa: bestMoaByRecipe[row.id] ?? null,
-    // Most recent Loading Session or Range Session logged for this recipe
-    // — falls back to the recipe's own created_at (nothing logged yet
-    // still has a meaningful "added on" date for sorting/display) rather
-    // than null, which would read as broken instead of just "brand new."
-    lastActivityAt: lastActivityByRecipe[row.id] ?? row.created_at,
-  }));
+  return (recipesRes.data || []).map((row) => {
+    // Reuses the exact same per-component pricing math Dashboard's
+    // costPerRound/totalMoneySpent/moneySaved use (see mapRecipeRow
+    // below) — `row` here has the same shape (caliber_id,
+    // charge_weight_grains, powder/bullet/primer/brass with .id) that
+    // function expects, just fetched in bulk instead of one at a time.
+    const costPerRound = calculateCostPerRound(row, inventoryMap);
+    const totalRoundsLoaded = totalRoundsLoadedByRecipe[row.id] ?? 0;
+    const factoryPricePerRound = row.factory_price_per_round ?? null;
+    return {
+      id: row.id,
+      title: row.title,
+      created_at: row.created_at,
+      caliber: row.calibers?.name ?? null,
+      firearm: row.firearm?.name ?? null,
+      powder: componentLabel(row.powder),
+      bullet: componentLabel(row.bullet),
+      primer: componentLabel(row.primer),
+      brass: componentLabel(row.brass),
+      bestMoa: bestMoaByRecipe[row.id] ?? null,
+      // Tightest group ever (bestMoa) vs. the most recent one measured
+      // (recentMoa) are genuinely different questions — "how good has
+      // this load ever shot" vs. "how's it shooting lately" — so both
+      // get their own card field rather than picking one.
+      recentMoa: recentMoaByRecipe[row.id] ?? null,
+      costPerRound,
+      totalMoneySpent: costPerRound != null ? costPerRound * totalRoundsLoaded : null,
+      moneySaved:
+        factoryPricePerRound != null && costPerRound != null
+          ? (factoryPricePerRound - costPerRound) * totalRoundsLoaded
+          : null,
+      // Most recent Loading Session or Range Session logged for this recipe
+      // — falls back to the recipe's own created_at (nothing logged yet
+      // still has a meaningful "added on" date for sorting/display) rather
+      // than null, which would read as broken instead of just "brand new."
+      lastActivityAt: lastActivityByRecipe[row.id] ?? row.created_at,
+    };
+  });
 }
 
 /** The user's archived (soft-deleted) recipes — the flip side of
