@@ -1,4 +1,5 @@
 import { Crosshair } from 'lucide-react';
+import InfoTooltip from './InfoTooltip.jsx';
 
 // Overview's two headline numbers — group size and velocity consistency —
 // merged into one card instead of a tall MOA badge stacked above a
@@ -34,8 +35,14 @@ export default function RecipeHeroCard({ moa, distanceYards, avgVelocity, stdDev
       <div className="flex flex-col items-center justify-center gap-1 border-b border-slate-800 pb-4 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-6">
         <Crosshair className="text-amber-400" size={26} strokeWidth={1.75} />
         <span className="font-mono text-2xl font-bold text-amber-400">{moa != null ? moa.toFixed(2) : '—'}</span>
-        <span className="font-mono text-[10px] tracking-widest text-slate-400">
+        <span className="flex items-center font-mono text-[10px] tracking-widest text-slate-400">
           {moa != null && distanceYards != null ? `MOA @ ${distanceYards}YD` : 'MOA'}
+          <InfoTooltip>
+            Pulled from the most recent Range Session that actually has a measured group and/or
+            velocity reading — a Quick Log session (rounds fired only, no target/chrono) is skipped
+            for these four numbers, even if it's more recent. See the Range Day tab for exactly
+            which session this came from.
+          </InfoTooltip>
         </span>
       </div>
       <div className="grid w-full flex-1 grid-cols-3 gap-3 sm:w-auto">

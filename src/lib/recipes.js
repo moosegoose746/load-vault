@@ -459,7 +459,7 @@ export async function createLoadBatch({ recipeId, userId, roundsLoaded, notes })
   return data;
 }
 
-function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch) {
+function mapRecipeRow(row, latestSession, measuredSession, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch) {
   const componentLabel = (c) => (c ? `${c.brand} ${c.model}` : '—');
   const costPerRound = calculateCostPerRound(row, inventory);
   const factoryPricePerRound = row.factory_price_per_round ?? null;
@@ -509,18 +509,34 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     // predate Firearm Profiles and were never given a linked one.
     firearmId: row.firearm_id ?? null,
     firearmLabel: row.firearm?.name ?? (row.rifle_model || null),
-    distanceYards: session?.distance_yards ?? 100,
-    groupSizeMoa: session?.group_size_moa ?? null,
+    // These seven fields deliberately read from measuredSession, NOT
+    // latestSession — a Quick Log session (see Dashboard's rangeMode) can
+    // easily be the most recent range trip while having none of this
+    // data, and pulling from whichever session is merely newest was
+    // nulling out the Overview hero card the moment one got logged (see
+    // the Range Day overhaul follow-up in the progress log). measuredSession
+    // is the most recent session that actually HAS a group size or
+    // velocity reading, which may be an older session than the true
+    // latest one below.
+    distanceYards: measuredSession?.distance_yards ?? 100,
+    groupSizeMoa: measuredSession?.group_size_moa ?? null,
     // Companion to groupSizeMoa above — MOA alone means nothing without
     // knowing the distance it was measured at, and plenty of shooters
     // think in inches at the actual distance shot rather than doing MOA
     // math in their head. Shown alongside MOA wherever group size renders
     // (see the Range Day reference card / history list).
-    groupSizeInches: session?.group_size_inches ?? null,
-    avgVelocity: session?.avg_velocity_fps ?? null,
-    stdDevFps: session?.std_dev_fps ?? null,
-    extremeSpread: session?.extreme_spread_fps ?? null,
-    targetImageUrl: session?.target_image_url ?? null,
+    groupSizeInches: measuredSession?.group_size_inches ?? null,
+    avgVelocity: measuredSession?.avg_velocity_fps ?? null,
+    stdDevFps: measuredSession?.std_dev_fps ?? null,
+    extremeSpread: measuredSession?.extreme_spread_fps ?? null,
+    targetImageUrl: measuredSession?.target_image_url ?? null,
+    // Date the above seven fields actually came from — NOT necessarily
+    // the same as lastFiredAt below, if the most recent trip(s) were
+    // Quick Logs. Lets the Range Day reference card be honest about
+    // "this group is from X, your last trip out was Y" instead of
+    // implying the group/velocity numbers are as fresh as the most
+    // recent session.
+    lastMeasuredAt: measuredSession?.created_at ?? null,
     costPerRound,
     // Total spent loading this recipe, lifetime — Cost/Round × every round
     // EVER logged as loaded (fetchTotalRoundsLoaded), same rounds-loaded
@@ -552,7 +568,10 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     // rifle last time out); falls back to the recipe's own linked
     // firearm (firearmId above) for the very first session, or for
     // recipes that have never had a session logged yet.
-    defaultFirearmId: session?.firearm_id ?? row.firearm_id ?? null,
+    // This one intentionally follows latestSession, not measuredSession —
+    // a Quick Log session is still a real, most-recent choice of firearm,
+    // unlike the group/velocity fields above which a Quick Log never has.
+    defaultFirearmId: latestSession?.firearm_id ?? row.firearm_id ?? null,
     shots: shots ?? [],
     // Free-text notes captured at recipe creation (see RecipeForm.jsx) —
     // selected by fetchRecipeDetail's query but previously never mapped
@@ -561,11 +580,23 @@ function mapRecipeRow(row, session, shots, inventory, roundsOnHand, totalRoundsL
     notes: row.notes || '',
     // "Recent Activity" summary on Overview — last time this recipe was
     // loaded at the bench vs. last time it was fired at the range. Both
-    // independently null if that side has never happened yet.
+    // independently null if that side has never happened yet. Follows
+    // latestSession (the true most recent trip, Quick Log included) —
+    // "last fired" should say when you actually last went, not silently
+    // skip over a Quick Log to report an older measured session's date.
     lastLoadedAt: lastBatch?.created_at ?? null,
     lastLoadedRounds: lastBatch?.rounds_loaded ?? null,
-    lastFiredAt: session?.created_at ?? null,
-    lastFiredRounds: session?.rounds_fired ?? null,
+    lastFiredAt: latestSession?.created_at ?? null,
+    lastFiredRounds: latestSession?.rounds_fired ?? null,
+    // Lets the UI distinguish "last trip had no group/velocity data
+    // because it was a Quick Log" from "last trip legitimately has no
+    // data yet" — used by the Range Day reference card to explain why
+    // lastFiredAt and lastMeasuredAt above might point at two different
+    // sessions.
+    lastFiredWasQuickLog:
+      latestSession != null &&
+      latestSession.group_size_moa == null &&
+      latestSession.avg_velocity_fps == null,
     // 'private' | 'unlisted' | 'public' — see schema.sql's original
     // load_recipes.visibility column and schema_public_recipes.sql for the
     // RLS policies that make 'public'/'unlisted' actually readable by an
@@ -617,12 +648,39 @@ export async function fetchRecipeDetail(recipeId, userId) {
   if (sessionError) throw sessionError;
 
   const latestSession = sessions?.[0];
+
+  // The true most-recent session (above) is what "last fired"/the default
+  // firearm pick should follow — a Quick Log session (see Dashboard's
+  // rangeMode) is a completely real, most-recent trip to the range. But
+  // it never has a group size or velocity reading, and a naive "pull MOA/
+  // FPS from whichever session is newest" was nulling out the Overview
+  // hero card the moment someone logged one (see the Range Day overhaul
+  // follow-up in the progress log). So the display fields that describe
+  // load PERFORMANCE — group size, velocity stats, the distance/photo
+  // that go with them — instead follow whichever session is most recent
+  // AND actually has one of those two measurements, which may be an
+  // older session than `latestSession` if the most recent trip(s) were
+  // Quick Logs. Skipped entirely (no extra query) if the latest session
+  // already qualifies, since it's then the same row either way.
+  let measuredSession = latestSession;
+  if (latestSession && latestSession.group_size_moa == null && latestSession.avg_velocity_fps == null) {
+    const { data: measuredSessions, error: measuredError } = await supabase
+      .from('range_sessions')
+      .select('*')
+      .eq('recipe_id', recipeId)
+      .or('group_size_moa.not.is.null,avg_velocity_fps.not.is.null')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (measuredError) throw measuredError;
+    measuredSession = measuredSessions?.[0] ?? null;
+  }
+
   let shots = [];
-  if (latestSession) {
+  if (measuredSession) {
     const { data: shotRows, error: shotError } = await supabase
       .from('shot_logs')
       .select('velocity_fps')
-      .eq('session_id', latestSession.id)
+      .eq('session_id', measuredSession.id)
       .order('shot_number', { ascending: true });
     if (shotError) throw shotError;
     shots = (shotRows || []).map((r) => r.velocity_fps);
@@ -635,7 +693,7 @@ export async function fetchRecipeDetail(recipeId, userId) {
     fetchLastLoadingBatch(recipeId),
   ]);
 
-  return mapRecipeRow(row, latestSession, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch);
+  return mapRecipeRow(row, latestSession, measuredSession, shots, inventory, roundsOnHand, totalRoundsLoaded, lastBatch);
 }
 
 /** The anonymous-safe counterpart to fetchRecipeDetail, powering the
@@ -676,10 +734,17 @@ export async function fetchPublicRecipeDetail(recipeId) {
     .single();
   if (error) throw error;
 
+  // Same fix as fetchRecipeDetail above (see the Range Day overhaul
+  // follow-up in the progress log): only ever pull performance stats from
+  // a session that actually has a group size or velocity reading, so a
+  // Quick Log session (rounds fired, no measurements) logged after the
+  // last real measured session doesn't null out a shared recipe's stats
+  // for whoever's viewing the public link.
   const { data: sessions, error: sessionError } = await supabase
     .from('range_sessions')
     .select('distance_yards, group_size_moa, avg_velocity_fps, std_dev_fps, extreme_spread_fps, target_image_url, created_at')
     .eq('recipe_id', recipeId)
+    .or('group_size_moa.not.is.null,avg_velocity_fps.not.is.null')
     .order('created_at', { ascending: false })
     .limit(1);
   if (sessionError) throw sessionError;
