@@ -1,14 +1,32 @@
 import { useMemo, useState } from 'react';
-import { ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Archive, ArrowDownNarrowWide, Pencil, Plus, Trash2 } from 'lucide-react';
 import MetricCard from './MetricCard.jsx';
 
 // A small label/value stat box — same visual treatment Best MOA already
 // used, pulled out since the card now shows four of these instead of one.
-function CardStat({ label, value }) {
+// `variant="saved"` mirrors MetricCard's emerald treatment so Money Saved
+// reads as the same kind of good-news figure here as it does on the
+// totals row and the individual recipe's Overview.
+function CardStat({ label, value, variant }) {
+  const isSaved = variant === 'saved';
   return (
-    <div className="flex items-center justify-between rounded border border-slate-800 bg-slate-900/60 px-3 py-2">
-      <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">{label}</span>
-      <span className="font-mono text-sm font-semibold text-amber-400">{value ?? '—'}</span>
+    <div
+      className={`flex items-center justify-between rounded border px-3 py-2 ${
+        isSaved ? 'border-emerald-700/60 bg-emerald-500/10' : 'border-slate-800 bg-slate-900/60'
+      }`}
+    >
+      <span
+        className={`font-mono text-[10px] uppercase tracking-widest ${
+          isSaved ? 'text-emerald-400' : 'text-slate-500'
+        }`}
+      >
+        {label}
+      </span>
+      <span
+        className={`font-mono text-sm font-semibold ${isSaved ? 'text-emerald-300' : 'text-amber-400'}`}
+      >
+        {value ?? '—'}
+      </span>
     </div>
   );
 }
@@ -61,7 +79,7 @@ function RecipeCard({ recipe, onOpen, onEdit, onDelete }) {
         <CardStat label="Cost/Round" value={moneyFmt(recipe.costPerRound)} />
         <CardStat label="Rounds Fired" value={recipe.totalRoundsFired || null} />
         <CardStat label="Total Spent" value={moneyFmt(recipe.totalMoneySpent)} />
-        <CardStat label="Money Saved" value={moneyFmt(recipe.moneySaved)} />
+        <CardStat label="Money Saved" value={moneyFmt(recipe.moneySaved)} variant="saved" />
       </div>
 
       {recipe.lastActivityAt && (
@@ -238,11 +256,19 @@ export default function RecipesHomePage({
         </div>
         <div className="flex items-center gap-2">
           {onViewArchived && (
+            // Upgraded from a bare text link to a bordered button matching
+            // NEW RECIPE's visual weight — a small text link next to the
+            // recipe cards was easy to miss as the only way to reach
+            // archived recipes (see the progress log's Recipes Home
+            // follow-up). Still visually secondary (slate, not amber) so it
+            // doesn't compete with NEW RECIPE for attention, but it's now a
+            // real button with an icon instead of blending into body text.
             <button
               onClick={onViewArchived}
-              className="font-mono text-[11px] text-slate-500 hover:text-amber-400"
+              className="flex items-center justify-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400"
             >
-              View archived
+              <Archive size={14} />
+              ARCHIVED
             </button>
           )}
           <button
@@ -269,6 +295,7 @@ export default function RecipesHomePage({
             value={lifetimeSaved != null ? `$${lifetimeSaved.toFixed(2)}` : null}
             label="Total Saved"
             info="Lifetime money saved vs. comparable factory ammo, across every recipe with a factory price set — same figure shown in the header badge."
+            variant="saved"
           />
           <MetricCard
             value={totals.bestMoaOverall != null ? totals.bestMoaOverall.toFixed(2) : null}
